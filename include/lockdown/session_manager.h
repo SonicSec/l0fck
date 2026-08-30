@@ -31,5 +31,6 @@ lockdownd_error_t session_start_service(
 
 /* Multi-tier resilient AFC client acquisition */
 int session_get_afc_client(l0fck_session_t *sess, afc_client_t *out_afc);
+int session_get_afc2_client(l0fck_session_t *sess, afc_client_t *out_afc);
 
 #endif /* SESSION_MANAGER_H */

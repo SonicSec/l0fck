@@ -1,5 +1,6 @@
 #include "l0fck.h"
 #include "activation/record_a18.h"
+#include "lockdown/lockdown_unauth.h"
 #include "core/log.h"
 #include "core/util.h"
 #include <stdio.h>
@@ -85,6 +86,65 @@ int record_a18_generate(const void *dev_ptr, plist_t handshake_resp, plist_t *ou
 int record_a18_generate_offline(const void *dev_ptr, plist_t *out_record, plist_t *out_session_headers)
 {
     return record_a18_generate(dev_ptr, NULL, out_record, out_session_headers);
+}
+
+int record_a18_enrich_with_device_certs(lockdownd_client_t ld, plist_t record)
+{
+    if (!ld || !record) return -1;
+
+    int enriched = 0;
+
+    /* Extract DeviceCertificate from device */
+    plist_t dev_cert = NULL;
+    if (lockdownd_get_value(ld, NULL, "DeviceCertificate", &dev_cert) == LOCKDOWN_E_SUCCESS && dev_cert) {
+        if (!plist_dict_get_item(record, "DeviceCertificate")) {
+            plist_dict_set_item(record, "DeviceCertificate", dev_cert);
+            enriched++;
+        } else {
+            plist_free(dev_cert);
+        }
+    }
+
+    /* Extract AccountTokenCertificate (available on some activation states) */
+    plist_t acct_cert = NULL;
+    if (lockdownd_get_value(ld, "com.apple.MobileActivation", "AccountTokenCertificate", &acct_cert) == LOCKDOWN_E_SUCCESS && acct_cert) {
+        if (!plist_dict_get_item(record, "AccountTokenCertificate")) {
+            plist_dict_set_item(record, "AccountTokenCertificate", acct_cert);
+            enriched++;
+        } else {
+            plist_free(acct_cert);
+        }
+    }
+
+    /* Extract FairPlayCertChain if available */
+    plist_t fp_chain = NULL;
+    if (lockdownd_get_value(ld, NULL, "FairPlayCertChain", &fp_chain) == LOCKDOWN_E_SUCCESS && fp_chain) {
+        if (!plist_dict_get_item(record, "FairPlayCertChain")) {
+            plist_dict_set_item(record, "FairPlayCertChain", fp_chain);
+            enriched++;
+        } else {
+            plist_free(fp_chain);
+        }
+    }
+
+    /* Extract RKCertification (attestation cert used by newer SEP) */
+    plist_t rk_cert = NULL;
+    if (lockdownd_get_value(ld, "com.apple.MobileActivation", "RKCertification", &rk_cert) == LOCKDOWN_E_SUCCESS && rk_cert) {
+        if (!plist_dict_get_item(record, "RKCertification")) {
+            plist_dict_set_item(record, "RKCertification", rk_cert);
+            enriched++;
+        } else {
+            plist_free(rk_cert);
+        }
+    }
+
+    if (enriched > 0) {
+        LOG_SUCCESS("Enriched activation record with %d device certificate(s)", enriched);
+    } else {
+        LOG_INFO("No device certificates could be extracted (unauthenticated session)");
+    }
+
+    return enriched;
 }
 
 void record_a18_print_summary(plist_t record)

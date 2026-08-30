@@ -4,22 +4,52 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int get_ma_client(idevice_t dev, lockdownd_client_t ld, mobileactivation_client_t *out_ma)
 {
     if (!dev || !ld || !out_ma) return -1;
     *out_ma = NULL;
 
+    lockdownd_client_t temp_ld = NULL;
+    
     lockdownd_service_descriptor_t desc = NULL;
     lockdownd_error_t lerr = lockdownd_start_service(ld, "com.apple.mobileactivationd", &desc);
+    
+    if (lerr == LOCKDOWN_E_SESSION_INACTIVE) {
+        LOG_INFO("get_ma_client: Service requires session negotiation (Error -23). Attempting escrow bag...");
+        lerr = lockdownd_start_service_with_escrow_bag(ld, "com.apple.mobileactivationd", &desc);
+        if (lerr == LOCKDOWN_E_SESSION_INACTIVE) {
+            LOG_INFO("get_ma_client: Escrow bag inactive. Attempting handshake negotiation...");
+            // Unauthenticated session requires a handshake
+            lockdownd_error_t herr = lockdownd_client_new_with_handshake(dev, &temp_ld, "l0fck");
+            if (herr == LOCKDOWN_E_SUCCESS && temp_ld) {
+                lerr = lockdownd_start_service(temp_ld, "com.apple.mobileactivationd", &desc);
+                if (lerr == LOCKDOWN_E_SESSION_INACTIVE) {
+                    lerr = lockdownd_start_service_with_escrow_bag(temp_ld, "com.apple.mobileactivationd", &desc);
+                }
+            } else {
+                LOG_INFO("get_ma_client: Handshake returned %d, attempting legacy pairing...", herr);
+                // Fallback to legacy pairing if handshake fails
+                lockdownd_pair(ld, NULL);
+                lerr = lockdownd_start_service(ld, "com.apple.mobileactivationd", &desc);
+                if (lerr == LOCKDOWN_E_SESSION_INACTIVE) {
+                    lerr = lockdownd_start_service_with_escrow_bag(ld, "com.apple.mobileactivationd", &desc);
+                }
+            }
+        }
+    }
+
     if (lerr != LOCKDOWN_E_SUCCESS || !desc) {
         LOG_ERROR("Failed to start com.apple.mobileactivationd service (error %d)", lerr);
+        if (temp_ld) lockdownd_client_free(temp_ld);
         return -1;
     }
 
     mobileactivation_client_t ma = NULL;
     mobileactivation_error_t merr = mobileactivation_client_new(dev, desc, &ma);
     lockdownd_service_descriptor_free(desc);
+    if (temp_ld) lockdownd_client_free(temp_ld);
 
     if (merr != MOBILEACTIVATION_E_SUCCESS || !ma) {
         LOG_ERROR("Failed to initialize mobileactivation client (error %d)", merr);
@@ -185,4 +215,46 @@ int mobileact_deactivate(idevice_t dev, lockdownd_client_t ld)
 
     LOG_SUCCESS("Device successfully deactivated.");
     return 0;
+}
+
+int mobileact_handle_with_session_prewarmed(idevice_t dev, lockdownd_client_t ld, plist_t act_record, plist_t session_headers, int delay_ms, void (*ready_cb)(void*, int), void* cb_arg)
+{
+    if (!act_record || !session_headers) {
+        if (ready_cb) ready_cb(cb_arg, 1);
+        return -1;
+    }
+
+    mobileactivation_client_t ma = NULL;
+    // Pre-warm the socket BEFORE the race delay
+    if (get_ma_client(dev, ld, &ma) != 0 || !ma) {
+        if (ready_cb) ready_cb(cb_arg, 1);
+        return -1;
+    }
+
+    LOG_INFO("Pre-warmed mobileactivationd connection. Waiting %dms before transmission...", delay_ms);
+    // Signal the main thread to start the crash NOW
+    if (ready_cb) ready_cb(cb_arg, 0);
+
+    usleep(delay_ms * 1000);
+
+    LOG_INFO("Submitting session activation record (HandleActivationInfoWithSessionRequest)...");
+    mobileactivation_error_t merr = mobileactivation_activate_with_session(ma, act_record, session_headers);
+    mobileactivation_client_free(ma);
+
+    if (merr != MOBILEACTIVATION_E_SUCCESS) {
+        if (merr == MOBILEACTIVATION_E_REQUEST_FAILED) {
+            LOG_INFO("mobileactivation_activate_with_session returned code %d", merr);
+        } else {
+            LOG_ERROR("mobileactivation_activate_with_session failed (error %d)", merr);
+        }
+        return (int)merr;
+    }
+
+    LOG_SUCCESS("Session activation record accepted by device!");
+    return 0;
+}
+
+int mobileact_prewarm_client(idevice_t dev, lockdownd_client_t ld, mobileactivation_client_t *out_ma)
+{
+    return get_ma_client(dev, ld, out_ma);
 }

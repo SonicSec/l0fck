@@ -152,16 +152,26 @@ int afc_write_file_data(afc_client_t afc, const char *path, const char *buf, uin
 {
     if (!afc || !path || !buf || len == 0) return -1;
 
+    // Strip duplicate or problematic slashes (basic normalization)
+    char norm_path[1024];
+    int j = 0;
+    for (int i = 0; path[i] != '\0' && j < sizeof(norm_path) - 1; i++) {
+        if (path[i] == '/' && (i > 0 && path[i-1] == '/')) continue;
+        norm_path[j++] = path[i];
+    }
+    norm_path[j] = '\0';
+
     uint64_t handle = 0;
-    afc_error_t err = afc_file_open(afc, path, AFC_FOPEN_WRONLY, &handle);
+    // Attempt multiple valid AFC open modes
+    afc_error_t err = afc_file_open(afc, norm_path, AFC_FOPEN_WRONLY, &handle);
     if (err != AFC_E_SUCCESS || handle == 0) {
-        err = afc_file_open(afc, path, AFC_FOPEN_RW, &handle);
+        err = afc_file_open(afc, norm_path, AFC_FOPEN_RW, &handle);
     }
     if (err != AFC_E_SUCCESS || handle == 0) {
-        err = afc_file_open(afc, path, AFC_FOPEN_WR, &handle);
+        err = afc_file_open(afc, norm_path, AFC_FOPEN_WR, &handle);
     }
     if (err != AFC_E_SUCCESS || handle == 0) {
-        LOG_DEBUG("afc_write_file_data: Failed to open '%s' (AFC error %d)", path, err);
+        LOG_DEBUG("afc_write_file_data: Failed to open '%s' (AFC error %d)", norm_path, err);
         return -1;
     }
 

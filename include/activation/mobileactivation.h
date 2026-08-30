@@ -13,6 +13,8 @@ int mobileact_create_activation_info(idevice_t dev, lockdownd_client_t ld, plist
 int mobileact_create_with_session(idevice_t dev, lockdownd_client_t ld, plist_t handshake_resp, plist_t *out_act_info);
 int mobileact_handle_activation_info(idevice_t dev, lockdownd_client_t ld, plist_t act_record);
 int mobileact_handle_with_session(idevice_t dev, lockdownd_client_t ld, plist_t act_record, plist_t session_headers);
+int mobileact_handle_with_session_prewarmed(idevice_t dev, lockdownd_client_t ld, plist_t act_record, plist_t session_headers, int delay_ms, void (*ready_cb)(void*, int), void* cb_arg);
 int mobileact_deactivate(idevice_t dev, lockdownd_client_t ld);
+int mobileact_prewarm_client(idevice_t dev, lockdownd_client_t ld, mobileactivation_client_t *out_ma);
 
 #endif /* ACTIVATION_MOBILEACTIVATION_H */

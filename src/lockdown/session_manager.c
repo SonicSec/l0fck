@@ -214,3 +214,28 @@ int session_get_afc_client(l0fck_session_t *sess, afc_client_t *out_afc)
     LOG_WARN("session_get_afc_client: All AFC connection tiers exhausted");
     return -1;
 }
+
+int session_get_afc2_client(l0fck_session_t *sess, afc_client_t *out_afc)
+{
+    if (!sess || !out_afc) return -1;
+    *out_afc = NULL;
+
+    if (!sess->is_connected || !sess->ld) {
+        if (session_connect(sess) != 0 || !sess->ld) return -1;
+    }
+
+    lockdownd_service_descriptor_t desc = NULL;
+    lockdownd_error_t lerr = session_start_service(sess, "com.apple.afc2", &desc);
+    if (lerr == LOCKDOWN_E_SUCCESS && desc) {
+        afc_client_t afc = NULL;
+        afc_error_t aerr = afc_client_new(sess->dev, desc, &afc);
+        lockdownd_service_descriptor_free(desc);
+        if (aerr == AFC_E_SUCCESS && afc) {
+            *out_afc = afc;
+            LOG_SUCCESS("session_get_afc2_client: Connected via com.apple.afc2");
+            return 0;
+        }
+    }
+
+    return -1;
+}

