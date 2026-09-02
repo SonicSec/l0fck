@@ -40,8 +40,13 @@ static void print_help(const char *prog_name)
     printf("      --exploit-preboard       Execute weaponized preboard privilege escalation\n");
     printf("      --stage-bypass           Stage persistent PurpleBuddy/SpringBoard configs to AFC\n");
     printf("      --dismiss-setup          Dispatch Darwin setup completion notifications\n");
+    printf("      --sovereign                ⚡ Execute Sovereign-Chain (Hybrid Security Degradation)\n");
+    printf("      --sovereign-lite           ⚡ Execute Sovereign-Lite (Injection + Notification Focus)\n");
     printf("      --bypass-full            🚀 Execute full 5-stage automated activation bypass chain\n");
     printf("      --bypass-watch           Start automated USB bypass watcher for connected devices\n");
+    printf("      --neo-chain              Execute Neo-Chain kernel exploitation activation bypass\n");
+    printf("      --test-kernel-exploit    Test kernel R/W primitive (V-047 / MCC fallback)\n");
+    printf("      --test-amfi-bypass       Test AMFI/CoreTrust bypass with kernel R/W\n");
     printf("      --captive-server [port]  Start local DNS/HTTP/TLS captive portal server (default 8080)\n");
     printf("      --captive-dns-port <p>   Specify DNS responder port (default 5353, use 53 with root)\n");
     printf("      --captive-tls-port <p>   Specify TLS MITM inspector port (default 8443, use 443 with root)\n");
@@ -327,6 +332,11 @@ int main(int argc, char **argv)
     int opt_bypass_watch = 0;
     int opt_captive = 0;
     int opt_test = 0;
+    int opt_sovereign = 0;
+    int opt_sovereign_lite = 0;
+    int opt_neo_chain = 0;
+    int opt_test_kernel_exploit = 0;
+    int opt_test_amfi_bypass = 0;
     int opt_verbose = 0;
 
     const char *afc_ls_path = NULL;
@@ -377,7 +387,12 @@ int main(int argc, char **argv)
         OPT_CAPTIVE_IP,
         OPT_CAPTIVE_MODE,
         OPT_EXPORT_PROFILE,
-        OPT_TEST
+        OPT_TEST,
+        OPT_SOVEREIGN,
+        OPT_SOVEREIGN_LITE,
+        OPT_NEO_CHAIN,
+        OPT_TEST_KERNEL_EXPLOIT,
+        OPT_TEST_AMFI_BYPASS
     };
 
     static struct option long_options[] = {
@@ -411,6 +426,11 @@ int main(int argc, char **argv)
         { "captive-mode",     required_argument, NULL, OPT_CAPTIVE_MODE },
         { "export-profile",   required_argument, NULL, OPT_EXPORT_PROFILE },
         { "test",             no_argument,       NULL, OPT_TEST },
+        { "sovereign",           no_argument,       NULL, OPT_SOVEREIGN },
+        { "sovereign-lite",      no_argument,       NULL, OPT_SOVEREIGN_LITE },
+        { "neo-chain",           no_argument,       NULL, OPT_NEO_CHAIN },
+        { "test-kernel-exploit", no_argument,       NULL, OPT_TEST_KERNEL_EXPLOIT },
+        { "test-amfi-bypass",    no_argument,       NULL, OPT_TEST_AMFI_BYPASS },
         { "verbose",          no_argument,       NULL, 'v' },
         { "help",             no_argument,       NULL, 'h' },
         { NULL, 0, NULL, 0 }
@@ -483,6 +503,11 @@ int main(int argc, char **argv)
                 export_profile_path = optarg;
                 break;
             case OPT_TEST: opt_test = 1; break;
+            case OPT_SOVEREIGN: opt_sovereign = 1; break;
+            case OPT_SOVEREIGN_LITE: opt_sovereign_lite = 1; break;
+            case OPT_NEO_CHAIN: opt_neo_chain = 1; break;
+            case OPT_TEST_KERNEL_EXPLOIT: opt_test_kernel_exploit = 1; break;
+            case OPT_TEST_AMFI_BYPASS: opt_test_amfi_bypass = 1; break;
             default:
                 print_help(argv[0]);
                 return 1;
@@ -493,6 +518,14 @@ int main(int argc, char **argv)
 
     if (opt_test) {
         return run_unit_tests();
+    }
+
+    if (opt_test_kernel_exploit) {
+        return neo_chain_test_kernel_exploit();
+    }
+
+    if (opt_test_amfi_bypass) {
+        return neo_chain_test_amfi_bypass();
     }
 
     if (export_profile_path) {
@@ -609,8 +642,14 @@ int main(int argc, char **argv)
         flag_injector_inject_all_session(&sess);
     } else if (opt_dismiss_setup) {
         ret = springboard_dispatch_notifications(&sess);
+    } else if (opt_sovereign) {
+        ret = sovereign_chain_run(&sess);
+    } else if (opt_sovereign_lite) {
+        ret = sovereign_lite_run(&sess);
     } else if (opt_bypass_full) {
         ret = bypass_chain_run_full(&sess, NULL);
+    } else if (opt_neo_chain) {
+        ret = neo_chain_run(&sess, NULL);
     }
 
     session_disconnect(&sess);
