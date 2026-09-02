@@ -223,13 +223,6 @@ Blocked exploit paths (DarkSword pe_v2, PUAF, `proc.p_flag`, IOMFB EAN, mobileac
 
 ---
 
-## Why Option 6 Failed & How Preboard (Point 14) Solves It
-
-- **Why Option 6 (`--inject-flags`) Failed**: Option 6 attempted to inject keys (`SetupDone`, `SkipSetup`) into `lockdownd` key-value pairs. Modern iOS isolates `lockdownd` from userland preferences on disk (`/var/mobile/Library/Preferences/com.apple.purplebuddy.plist`). `Setup.app` reads CFPreferences directly from disk rather than querying lockdown.
-- **How Preboard (Point 14) Solves It**: `com.apple.preboardservice_v2` is accessible without authentication over USB and runs as a privileged system daemon (`root` / `_preboard`) with keybag entitlements and direct disk access. By extending this vulnerability into a 5-stage exploit chain, we stage genuine disk preferences and trigger SpringBoard completion notifications to achieve a fully functional Home Screen.
-
----
-
 ## Build & Installation
 
 ### Prerequisites (macOS Homebrew)
@@ -347,7 +340,7 @@ Unresolved offsets (`proc.p_flag`, thread machine fields, SEP mailbox, IOMFB EAN
 
 ---
 
-## Recent Changes (since last push)
+## Recent Changes
 
 - **Neo-Chain framework**: kernel exploit orchestration, AMFI/CoreTrust/SEP modules, CLI flags (`--neo-chain`, `--test-kernel-exploit`, `--test-amfi-bypass`)
 - **Sovereign-Chain / Sovereign-Lite**: hybrid security-degradation bypass chains (`--sovereign`, `--sovereign-lite`)
