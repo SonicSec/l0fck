@@ -185,34 +185,40 @@ EOF
 
 print_doc_self_test() {
     cat <<'EOF'
-Host-only embedded unit test suite (12 tests). Validates parsers,
+Host-only embedded unit test suite (16 tests). Validates parsers,
 synthesizers, and lifecycle helpers without a connected device:
 Port DFU serial parser, Base64 codec, A18 target gating, activation
 record synthesizer, DNS/HTTP captive parsers, mobileconfig generator,
 root CA PEM, .IPS crash triage parser, PurpleBuddy/SpringBoard plist
-synthesizers, session manager init, and SetupAssistant/iTunes plists.
+synthesizers, session manager init, SetupAssistant/iTunes plists,
+AppleAVE2 portal telemetry parser, SetupAssistant activation engine,
+KASLR slide & slid addressing, and KRW HTTP C2 bridge with dynamic
+discovery (allproc walk, DeviceTree, PTOV table simulation).
 EOF
 }
 
 print_doc_test_kernel_exploit() {
     cat <<'EOF'
-Isolated kernel R/W primitive test (not the full Neo-Chain). Tries
-V-047 AppleJPEGDriver OOB write (startDecoderExt, IOSurface heap groom,
-NECP PGZ spray) first; falls back to AppleMCCUserClientV2 testMode
-(selectors 0x12/0x7/0x8/0x10). On success, probes kread64 against
-allproc using iOS 26.6.1 T8140 offsets. Host orchestration only;
-live IOKit exploitation requires an on-device payload.
+Isolated kernel R/W primitive test (not the full Neo-Chain). Primary:
+AppleAVE2 CVE-2026-84607 eEncType race condition via IOKit or portal
+WebCodecs. Fallback 1: V-047 AppleJPEGDriver OOB write (startDecoderExt,
+IOSurface heap groom, NECP PGZ spray). Fallback 2: AppleMCCUserClientV2
+testMode (selectors 0x12/0x7/0x8/0x10). On success, probes kread64
+against allproc using iOS 26.6.1 T8140 offsets with PAC pointer
+stripping. Host orchestration only; live IOKit exploitation requires
+an on-device payload or WebSheet captive portal.
 EOF
 }
 
 print_doc_test_amfi_bypass() {
     cat <<'EOF'
 Isolated AMFI/CoreTrust bypass test (not the full Neo-Chain). Obtains
-kernel R/W (V-047, then MCC fallback), walks allproc for process
-enumeration (struct_size 0x750, p_name +0x4d8), attempts AMFI HSP
-disable (blocked if unresolved), then tests trust_cache_rt injection
-and CoreTrust cs_blob validation patch. proc.p_flag fastPathSign paths
-remain blocked per awaiting_offsets.txt.
+kernel R/W (AppleAVE2 primary, V-047 or MCC fallback), walks allproc
+with PAC stripping for process enumeration (struct_size 0x750, p_name
++0x4d8), disarms security daemons via proc.p_flag (+0x454) P_AMFI_DISABLED
+bit patching, then tests trust_cache_rt cave injection (writable cave
+discovery + CDHash write + pointer update) and CoreTrust cs_blob
+validation patch.
 EOF
 }
 
@@ -352,26 +358,39 @@ print_art_self_test() {
         |            SetupAssistant/iTunes plists, mobileconfig, CA PEM
         +-- Gating:  A18 Pro / iOS 26.6.1 target validator
         +-- Lifecycle: session manager struct init
+        +-- AppleAVE2: portal telemetry parser & kbase validator
+        +-- Activation: SetupAssistant post-exploit force-success engine
+        +-- Kernel:  KASLR slide & slid address calculation
+        +-- Bridge:  KRW HTTP C2 bridge & dynamic allproc/PTOV discovery
 EOF
 }
 
 print_art_test_kernel_exploit() {
     cat <<'EOF'
-Primary (V-047):
-userspace app
+Primary (AppleAVE2 CVE-2026-84607):
+WebSheet / IOKit app
      |
      v
++-------------------+  codec switch race  +-------------------+
+| VideoEncoder /    | ------------------> | AppleAVE2Driver   |
+| IOKit UserClient  |                     | sEnc.eType desync |
++-------------------+                     +--------+----------+
+                                                   |
+                                                   v
+                                          kernel R/W primitive
+                                                   |
+                                                   v
+                                          kread64(allproc) + PAC strip
+
+Fallback 1 (V-047):
 +-------------------+   malformed decoder req   +----------------+
 | IOKit connection  | ------------------------> | AppleJPEGDriver |
 +-------------------+                           +-------+--------+
                                                         |
                                                         v
                                                kernel heap overwrite
-                                                        |
-                                                        v
-                                               kread64(allproc) probe
 
-Fallback (MCC):
+Fallback 2 (MCC):
 +-----------+  sel 0x12/0x7/0x8/0x10  +----------------------+
 | l0fck host| ----------------------> | AppleMCCUserClientV2 |
 +-----------+                         +----------+-----------+
@@ -383,19 +402,22 @@ EOF
 
 print_art_test_amfi_bypass() {
     cat <<'EOF'
-kernel R/W (V-047 or MCC)
+kernel R/W (AppleAVE2 primary, V-047/MCC fallback)
         |
-        +--> allproc walk (struct_size 0x750, p_name +0x4d8)
+        +--> allproc walk + PAC strip (struct_size 0x750, p_name +0x4d8)
         |         |
         |         v
-        |    process enumeration
+        |    process enumeration (mobileactivationd, amfid, SpringBoard)
         |
-        +--> trust_cache_rt injection (0xfffffff007cdab20)
+        +--> proc.p_flag (+0x454) P_AMFI_DISABLED bit patching
         |         |
         |         v
-        |    cdhash accepted by AMFI/CoreTrust
+        |    security daemon disarm (per-process)
         |
-        +--> AMFI HSP disable (blocked: proc.p_flag unresolved)
+        +--> trust_cache_rt cave injection (writable cave discovery)
+        |         |
+        |         v
+        |    CDHash --> cave --> update trust_cache_rt pointer
         |
         +--> CoreTrust cs_blob validation patch (data-only)
 EOF
