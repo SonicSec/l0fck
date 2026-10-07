@@ -826,7 +826,7 @@ menu_diagnostics() {
         print_banner
         echo -e "${CYAN}${BOLD}Diagnostics${RESET}"
         echo ""
-        echo -e "${BOLD}1.${RESET}  Run Embedded Self-Tests (12/12 Verification)"
+        echo -e "${BOLD}1.${RESET}  Run Embedded Self-Tests (16/16 Verification)"
         echo -e "${BOLD}2.${RESET}  Test Kernel Exploit Primitive (V-047 / MCC)"
         echo -e "${BOLD}3.${RESET}  Test AMFI / CoreTrust Bypass"
         echo ""
