@@ -58,7 +58,7 @@ $(TARGET): $(OBJS)
 clean:
 	rm -f $(OBJS) $(TARGET)
 
-.PHONY: all clean payload-v047 payload-pmap payload-appleave2
+.PHONY: all clean payload-v047 payload-pmap payload-appleave2 payload-glyphgrift
 
 payload-v047:
 	$(MAKE) -C payloads/v047 SDK=iphoneos
@@ -68,3 +68,6 @@ payload-pmap:
 
 payload-appleave2:
 	$(MAKE) -C payloads/appleave2 SDK=iphoneos
+
+payload-glyphgrift:
+	$(MAKE) -C payloads/glyphgrift

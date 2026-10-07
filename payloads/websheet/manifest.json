@@ -40,6 +40,33 @@
       "live": 0,
       "auto": false,
       "entry": "probes/jsc_watchpoint_oom.js"
+    },
+    {
+      "id": "glyphgrift_pdf_trigger",
+      "title": "CVE-2026-86950 CoreGraphics GlyphGrift PDF Trigger",
+      "target_builds": ["23G83"],
+      "status": "exploit",
+      "live": 0,
+      "auto": false,
+      "entry": "probes/glyphgrift_pdf_trigger.js"
+    },
+    {
+      "id": "glyphgrift_heap_spray",
+      "title": "CVE-2026-86950 GlyphGrift Heap Spray (kalloc zone fill)",
+      "target_builds": ["23G83"],
+      "status": "exploit",
+      "live": 0,
+      "auto": false,
+      "entry": "probes/glyphgrift_heap_spray.js"
+    },
+    {
+      "id": "glyphgrift_post_trigger",
+      "title": "CVE-2026-86950 GlyphGrift Post-Trigger Corruption Scan",
+      "target_builds": ["23G83"],
+      "status": "exploit",
+      "live": 0,
+      "auto": false,
+      "entry": "probes/glyphgrift_post_trigger.js"
     }
   ]
 }

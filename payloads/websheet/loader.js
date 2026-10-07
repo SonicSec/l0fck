@@ -55,6 +55,16 @@
     }
   }
 
+  function wantGlyphgrift() {
+    if (window.__L0FCK_GLYPHGRIFT === true) return true;
+    try {
+      var q = (window.location && window.location.search) || '';
+      return /(?:\?|&)glyphgrift=1(?:&|$)/.test(q);
+    } catch (e) {
+      return false;
+    }
+  }
+
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
       var s = document.createElement('script');
@@ -100,6 +110,7 @@
           }
           var run = !!p.auto;
           if (p.id === 'jsc_watchpoint_oom' && wantOom()) run = true;
+          if (p.id === 'glyphgrift_pdf_trigger' && wantGlyphgrift()) run = true;
           if (!run) {
             log('skip (not auto): ' + p.id);
             return;
