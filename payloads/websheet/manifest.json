@@ -1,0 +1,45 @@
+{
+  "target_os": "iOS 26.6.1",
+  "target_build": "23G83",
+  "target_device": "iPhone17,1 / A18 Pro",
+  "stage4_native_rce": false,
+  "note": "Research harness only — no live WebKit/JSC RCE payload for 23G83.",
+  "probes": [
+    {
+      "id": "capability_probe",
+      "title": "WebSheet capability recon",
+      "target_builds": ["23G83"],
+      "status": "probe",
+      "live": 0,
+      "auto": true,
+      "entry": "probes/capability_probe.js"
+    },
+    {
+      "id": "video_encoder_probe",
+      "title": "Hardware Video Encoder & WebCodecs Subsystem Probe",
+      "target_builds": ["23G83"],
+      "status": "probe",
+      "live": 0,
+      "auto": true,
+      "entry": "probes/video_encoder_probe.js"
+    },
+    {
+      "id": "appleave2_portal_race",
+      "title": "AppleAVE2 (CVE-2026-84607) Portal Video Exploit",
+      "target_builds": ["23G83"],
+      "status": "exploit",
+      "live": 0,
+      "auto": true,
+      "entry": "probes/appleave2_portal_race.js"
+    },
+    {
+      "id": "jsc_watchpoint_oom",
+      "title": "JSC watchpoint OOM stress (DoS research, non-weaponized)",
+      "target_builds": ["23G83"],
+      "status": "dos_research",
+      "live": 0,
+      "auto": false,
+      "entry": "probes/jsc_watchpoint_oom.js"
+    }
+  ]
+}

