@@ -254,13 +254,14 @@ EOF
 print_doc_glyphgrift_chain() {
     cat <<'EOF'
 CVE-2026-86950 GlyphGrift V2 — Coverage Buffer Shaping & Controlled Primitive:
-Soft AP → WebSheet heap spray (kalloc.128) → multi-PDF OOB (trigger_k128 then
-trigger_k192) → corruption scan → captive_krw bridge → AMFI/SEP/activation.
+Soft AP → WebSheet heap spray (bmalloc 48-256B multi-zone) → multi-PDF OOB
+(k128, k192, and DX 33-40 sweep; up to 5 retry rounds) → corruption scan →
+captive_krw bridge → AMFI/SEP/activation.
 Stages 0–4 unchanged (trigger/telemetry). Stages 5–8 auto-chain after the
 OOB path (no operator y/N). Crash/OOB alone never implies kernel R/W.
 Operator selects delivery vector before start:
-  1) <img> ImageIO thumbnail path
-  2) <iframe>/<object> CG PDF render path
+  1) <img> ImageIO thumbnail path (in-process)
+  2) <object> inline CG PDF render path
 Heap-only for exploit stages; --glyphgrift-stack remains research-only.
 Fixed in iOS 26.7.1. Target iOS 26.6.1 (23G83) is vulnerable.
 EOF
@@ -447,10 +448,10 @@ print_art_glyphgrift_chain() {
   iPhone (Setup Assistant)  --->  Soft AP / Wi-Fi  --->  Captive DNS/HTTP
            |                                                 |
            v                                                 v
-  WebSheet V2 HTML         <--- spray + k128/k192 PDFs  <--- l0fck Host
+  WebSheet V2 HTML         <--- multi-zone + DX sweep   <--- l0fck Host
            |
-           +--> Stage5: ArrayBuffer spray (kalloc.128 holes)
-           +--> Stage6: trigger_k128.pdf then trigger_k192.pdf
+           +--> Stage5: bmalloc ArrayBuffer spray (48-256B, 1024/zone)
+           +--> Stage6: k128 -> k192 -> DX 33-40 sweep (up to 5 rounds)
            |         |
            |         v
            |    aa_cache_render OOB → adjacent spray corruption?

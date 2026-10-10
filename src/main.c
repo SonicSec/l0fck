@@ -938,17 +938,31 @@ static int run_unit_tests(void)
                             ready.relative_rw_achieved && ready.krw_ready &&
                             ready.kbase == 0xfffffff017004000ULL);
 
-        bool pdf_k128 = false, pdf_k192 = false;
+        static const char multi_zone_telem[] =
+            "{\"corruption_detected\":true,\"corrupted_buffer_index\":12,"
+            "\"corrupted_zone\":160,\"corrupted_offset\":18,\"corrupted_value\":77,"
+            "\"round\":2,\"total_scanned\":4096,\"zones_scanned\":8,"
+            "\"relative_rw_achieved\":false,\"krw_ready\":false,\"kbase\":0}";
+        captive_glyphgrift_exploit_result_t mz_parsed;
+        bool mz_ok = (captive_http_parse_glyphgrift_exploit_result(
+                          multi_zone_telem, strlen(multi_zone_telem), &mz_parsed) == 0 &&
+                      mz_parsed.corruption_detected && mz_parsed.corrupted_zone == 160 &&
+                      mz_parsed.round == 2 && mz_parsed.total_scanned == 4096 &&
+                      mz_parsed.zones_scanned == 8);
+
+        bool pdf_k128 = false, pdf_k192 = false, pdf_dx_sweep = false;
         static const char *cands[] = {
             "payloads/glyphgrift/", "./payloads/glyphgrift/",
             "l0fck/payloads/glyphgrift/", NULL
         };
         for (int i = 0; cands[i]; i++) {
-            char p128[256], p192[256];
+            char p128[256], p192[256], pdx[256];
             snprintf(p128, sizeof(p128), "%strigger_k128.pdf", cands[i]);
             snprintf(p192, sizeof(p192), "%strigger_k192.pdf", cands[i]);
+            snprintf(pdx, sizeof(pdx), "%strigger_dx35.pdf", cands[i]);
             FILE *a = fopen(p128, "rb");
             FILE *b = fopen(p192, "rb");
+            FILE *c = fopen(pdx, "rb");
             if (a) {
                 fseek(a, 0, SEEK_END);
                 if (ftell(a) > 0) pdf_k128 = true;
@@ -959,19 +973,24 @@ static int run_unit_tests(void)
                 if (ftell(b) > 0) pdf_k192 = true;
                 fclose(b);
             }
-            if (pdf_k128 && pdf_k192) break;
+            if (c) {
+                fseek(c, 0, SEEK_END);
+                if (ftell(c) > 0) pdf_dx_sweep = true;
+                fclose(c);
+            }
+            if (pdf_k128 && pdf_k192 && pdf_dx_sweep) break;
         }
 
         bool path_ok = (captive_http_glyphgrift_exploit_result_path() != NULL &&
                         captive_http_glyphgrift_exploit_result_path()[0] != '\0');
 
-        if (reset_ok && refuse_fake && crash_ok && ready_parse && pdf_k128 && pdf_k192 && path_ok) {
+        if (reset_ok && refuse_fake && crash_ok && ready_parse && mz_ok && pdf_k128 && pdf_k192 && pdf_dx_sweep && path_ok) {
             printf(ANSI_COLOR_GREEN "[PASS]" ANSI_COLOR_RESET "\n");
             passed++;
         } else {
             printf(ANSI_COLOR_RED "[FAIL]" ANSI_COLOR_RESET
-                   " (reset=%d refuse_fake=%d crash=%d ready=%d k128=%d k192=%d path=%d)\n",
-                   reset_ok, refuse_fake, crash_ok, ready_parse, pdf_k128, pdf_k192, path_ok);
+                   " (reset=%d refuse_fake=%d crash=%d ready=%d mz=%d k128=%d k192=%d dx=%d path=%d)\n",
+                   reset_ok, refuse_fake, crash_ok, ready_parse, mz_ok, pdf_k128, pdf_k192, pdf_dx_sweep, path_ok);
         }
     }
 
