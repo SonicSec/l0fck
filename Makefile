@@ -19,9 +19,10 @@ SRCS = src/main.c \
        src/activation/albert_client.c \
        src/activation/record_a18.c \
        src/activation/ingest_parser.c \
-       src/exploits/preboard_poc.c \
-       src/exploits/preboard_triage.c \
-       src/exploits/preboard_exploit.c \
+      src/exploits/preboard_poc.c \
+      src/exploits/preboard_triage.c \
+      src/exploits/preboard_exploit.c \
+      src/exploits/preboard_race.c \
        src/exploits/springboard_injector.c \
        src/exploits/bypass_chain.c \
        src/exploits/kernel_exploit.c \

@@ -129,9 +129,18 @@ EOF
 
 print_doc_preboard_race() {
     cat <<'EOF'
+[RESEARCH-ONLY / UNPROVEN (D1)]
 VUL 23 TOCTOU race between preboardservice_v2 disruption and
 mobileactivationd activation handling. Targets Setup Assistant /
-pre-activation state. Known limitation: SEP-backed cryptographic
+pre-activation state.
+
+WARNING: this path fires non-standard plist commands to
+com.apple.preboardservice_v2 (CreateStashbag/CommitStashbag/StashbagMode/
+SkipAuthCheck) that are NOT confirmed to exist on the target. No crash or
+state-change has been verified on the real device. The production activation
+path is the Wi-Fi GlyphGrift (CVE-2026-86950) chain, not this race.
+
+Known limitation: SEP-backed cryptographic
 validation may still reject the activation record.
 EOF
 }
@@ -156,8 +165,9 @@ EOF
 print_doc_bypass_full() {
     cat <<'EOF'
 Full 5-stage activation bypass chain: AFC staging, online activation
-or VUL 23 race fallback, crash triage, Darwin notification burst,
-and live SpringBoard transition. Does not require kernel exploitation.
+or VUL 23 race fallback (RESEARCH-ONLY / UNPROVEN - invented keys),
+crash triage, Darwin notification burst, and live SpringBoard transition.
+Does not require kernel exploitation.
 EOF
 }
 
@@ -638,7 +648,7 @@ menu_activation_albert() {
         echo ""
         echo -e "${BOLD}1.${RESET}  Albert DRM Handshake & IngestBody Inspection Probe"
         echo -e "${BOLD}2.${RESET}  Execute Full 5-Stage Online Albert Activation"
-        echo -e "${BOLD}3.${RESET}  Execute VUL 23 TOCTOU Race Activation"
+        echo -e "${BOLD}3.${RESET}  Execute VUL 23 TOCTOU Race Activation  ${YELLOW}[RESEARCH/UNPROVEN]${RESET}"
         echo -e "${BOLD}4.${RESET}  Deactivate Device Activation State"
         echo ""
         echo -e "${BOLD}B.${RESET}  Back"
@@ -660,10 +670,10 @@ menu_activation_albert() {
                 "${YELLOW}Caution: modifies activation state${RESET}" \
                 print_doc_albert_tls print_art_albert_tls \
                 ./l0fck --activate-online ;;
-            3) run_confirmed "3" "VUL 23 TOCTOU Race Activation" \
+            3) run_confirmed "3" "VUL 23 TOCTOU Race Activation [RESEARCH/UNPROVEN]" \
                 "./l0fck --activate-race" \
                 "ON, Setup Assistant / pre-activation state" \
-                "${YELLOW}Caution: race exploit, may crash services${RESET}" \
+                "${YELLOW}RESEARCH-ONLY / UNPROVEN (D1): fires invented preboardservice_v2 keys, unverified. Wi-Fi GlyphGrift chain is the production path.${RESET}" \
                 print_doc_preboard_race print_art_preboard_race \
                 ./l0fck --activate-race ;;
             4) run_confirmed "4" "Deactivate Device" \

