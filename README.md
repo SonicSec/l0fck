@@ -126,6 +126,27 @@ l0fck/
 ├── README.md                         # Technical documentation
 ├── patch_mock.py                     # Runtime plist mock patching utility
 ├── start.sh                          # Interactive grouped terminal menu with confirmation screens
+├── RESEARCH/                         # Chain & findings reference (read before implementing changes)
+│   ├── README.md                     # Index: chains, findings, conventions, provenance
+│   ├── chain-bypass-full.md          # Bypass-Full 5-stage TOCTOU chain
+│   ├── chain-sovereign.md            # Sovereign-Chain / Sovereign-Lite
+│   ├── chain-neo-chain.md            # Neo-Chain kernel R/W framework
+│   ├── chain-setup-assistant.md      # SetupAssistant-Chain (Wi-Fi only)
+│   ├── chain-glyphgrift.md           # GlyphGrift-Chain (CVE-2026-86950)
+│   ├── chain-restore-chain.md        # Restore-Chain (MB2 restore-staging) + A18 Pro close-out
+│   ├── findings-kernel-rw-hardening.md  # Winning primitive + Stage-6 hardening
+│   ├── findings-kernel-offsets.md    # 26.6.1 T8140 offsets, recovered/blocked, promotion rules
+│   ├── findings-preboard-vul23.md    # Preboard PoC/triage + D1 dead-end
+│   ├── findings-lockdown-ssl-bypass.md  # Unauthenticated lockdownd SSL/trust traversal
+│   ├── findings-activation-ambit.md  # SEP nonce wall, AFC limits, mb2 gates, DFU close-out
+│   └── findings-zero-fake-success.md # Governing no-fake-success policy
+├── tools/                            # Host-side Python diagnostics (CoreDevice RSD / mb2)
+│   ├── .venv/                        # pymobiledevice3 11.27.2 venv (gitignored)
+│   ├── mb2_reachability.py           # Canonical RSD check-in → REACHABLE/NOT_IN_RSD_LIST/CONNECT_FAILED
+│   ├── mb2_checkin_diag.py           # Raw RSD check-in bytes
+│   ├── mb2_fmip_diag.py              # Lockdown state (Find My / trusted)
+│   ├── mb2_control_diag.py           # A/B service-control StartService probe
+│   └── mb2_reachability_*.txt        # Dated live-verb reports
 ├── include/
 │   ├── l0fck.h                       # Master header and global structures
 │   ├── core/
@@ -154,10 +175,11 @@ l0fck/
 │       ├── preboard_poc.h            # Vulnerability #23 preboardservice_v2 PoC
 │       ├── preboard_triage.h         # Live crash triage & register analyzer
 │       ├── preboard_exploit.h        # Weaponized preboard privilege escalation
+│       ├── preboard_race.h           # VUL 23 TOCTOU race timer (synchronized bg thread)
 │       ├── springboard_injector.h    # Setup dismissal & disk preference staging
 │       ├── bypass_chain.h            # Bypass engines: full, sovereign, neo-chain, setup-assistant-chain
 │       ├── kernel_exploit.h          # Unified kernel R/W primitive framework
-│       ├── kernel_offsets.h          # iOS 26.6.1 T8140 verified kernel offsets (104 entries)
+│       ├── kernel_offsets.h          # iOS 26.6.1 T8140 verified kernel offsets (68 #defines)
 │       ├── amfi_bypass.h             # AMFI HSP disable & proc enumeration
 │       ├── coretrust_bypass.h        # trust_cache_rt cave injection & validation patch
 │       ├── cvmserver_exploit.h       # CVMServer cdhash registration (userspace)
@@ -204,6 +226,7 @@ l0fck/
 │       ├── preboard_poc.c
 │       ├── preboard_triage.c
 │       ├── preboard_exploit.c
+│       ├── preboard_race.c           # VUL 23 TOCTOU race timer
 │       ├── springboard_injector.c
 │       ├── bypass_chain.c            # bypass-full, sovereign, sovereign-lite, neo-chain, setup-assistant-chain
 │       ├── kernel_exploit.c          # Unified kernel R/W with PAC stripping & page-skip discovery
@@ -247,6 +270,12 @@ l0fck/
     │   ├── appleave2_payload.m       # Objective-C AppleAVE2Driver IOKit runner
     │   ├── appleave2_core.c / .h     # eEncType race core logic
     │   └── appleave2_result.h        # Shared result constants
+    ├── glyphgrift/                   # GlyphGrift (CVE-2026-86950) PDF/font assets & Gate-0 harness
+    │   ├── Makefile                  # Local render harness (Gate 0) + crash-sweep
+    │   ├── README.md
+    │   ├── render.c                  # Local renderer (reproduces the aa_cache_render fault)
+    │   ├── gen_font.py / gen_pdf.py  # TrueType + trigger-PDF generators
+    │   └── trigger*.pdf / .ttf       # dx33-40, k128, k192, stack variants + crash_*.pdf
     └── websheet/                     # WebSheet JavaScript probe payloads
         ├── README.md                 # Payload documentation
         ├── loader.js                 # Main WebSheet loader & probe orchestrator
@@ -255,7 +284,12 @@ l0fck/
             ├── appleave2_portal_race.js  # CVE-2026-84607 WebCodecs VideoEncoder race
             ├── video_encoder_probe.js    # WebCodecs hardware acceleration probe
             ├── capability_probe.js       # WebKit SAB/WASM/SharedArrayBuffer audit
-            └── jsc_watchpoint_oom.js     # JSC watchpoint OOM research probe
+            ├── jsc_watchpoint_oom.js     # JSC watchpoint OOM research probe
+            ├── glyphgrift_pdf_trigger.js # GlyphGrift multi-PDF OOB trigger
+            ├── glyphgrift_heap_spray.js  # Multi-bmalloc-zone heap spray
+            ├── glyphgrift_post_trigger.js# Post-trigger relative R/W init
+            ├── glyphgrift_krw.js         # GlyphGrift KRW primitive & kbase scan
+            └── captive_krw_client.js     # KRW HTTP C2 bridge client
 ```
 
 ---
@@ -402,6 +436,9 @@ make payload-pmap
 
 # AppleAVE2 CVE-2026-84607 payload
 make payload-appleave2
+
+# GlyphGrift (CVE-2026-86950) local render harness (Gate 0, host-side)
+make payload-glyphgrift
 ```
 
 ---
@@ -613,8 +650,38 @@ Unresolved offsets (`kcall_return` gadget, PPL symbols, SEP mailbox, IOMFB EAN, 
 
 ---
 
+## Research & Findings Reference
+
+`l0fck/RESEARCH/` is the canonical, per-chain and per-finding reference for
+everything implemented in `l0fck`. **Read the relevant doc before changing an
+existing chain or implementing a new custom chain** (see the `l0fck-research`
+skill at `../.agents/skills/l0fck-research/SKILL.md`).
+
+| Area | Doc |
+|---|---|
+| Chain index + conventions | `RESEARCH/README.md` |
+| Bypass-Full (5-stage TOCTOU) | `RESEARCH/chain-bypass-full.md` |
+| Sovereign-Chain / Sovereign-Lite | `RESEARCH/chain-sovereign.md` |
+| Neo-Chain (kernel R/W framework) | `RESEARCH/chain-neo-chain.md` |
+| SetupAssistant-Chain (Wi-Fi only) | `RESEARCH/chain-setup-assistant.md` |
+| GlyphGrift-Chain (CVE-2026-86950) | `RESEARCH/chain-glyphgrift.md` |
+| Restore-Chain (MB2) + A18 Pro close-out | `RESEARCH/chain-restore-chain.md` |
+| Kernel R/W winning primitive + Stage-6 hardening | `RESEARCH/findings-kernel-rw-hardening.md` |
+| 26.6.1 T8140 offsets, recovered/blocked, promotion | `RESEARCH/findings-kernel-offsets.md` |
+| Preboard / VUL 23 PoC + D1 dead-end | `RESEARCH/findings-preboard-vul23.md` |
+| Lockdown SSL bypass & host-trust traversal | `RESEARCH/findings-lockdown-ssl-bypass.md` |
+| SEP nonce wall, AFC limits, mb2 gates, DFU close-out | `RESEARCH/findings-activation-ambit.md` |
+| Zero-fake-success governing policy | `RESEARCH/findings-zero-fake-success.md` |
+
+These docs synthesize `PLAN/*.md`, `l0fck/src/**`, and live A18 Pro results.
+Where a `PLAN/` "final report" was refuted by logs, the corrective plan wins
+and the refuted claim is marked **superseded**.
+
+---
+
 ## Recent Changes
 
+- **RESEARCH/ reference folder + `l0fck-research` skill (2026-10-12)**: New `l0fck/RESEARCH/` folder (13 docs) is the canonical per-chain + per-finding reference — one `.md` per implemented chain (bypass-full, sovereign, neo-chain, setup-assistant, glyphgrift, restore-chain) and one per cross-cutting finding (kernel R/W hardening, 26.6.1 T8140 offsets, preboard/VUL 23 D1 dead-end, lockdown SSL bypass, activation ambit/mb2 gates/DFU close-out, zero-fake-success policy). Docs synthesize `PLAN/*.md` + `l0fck/src/**` + live A18 Pro results; refuted "final reports" are marked superseded. A new `l0fck-research` Kilo skill (at `../.agents/skills/l0fck-research/`) mandates reading the relevant RESEARCH doc before implementing changes to an existing chain or a new custom chain. README tree corrected to match source (`tools/`, `RESEARCH/`, `payloads/glyphgrift/`, `preboard_race.c`, `applemcc_exploit.c`, 5 GlyphGrift/KRW WebSheet probes, `payload-glyphgrift` target; kernel-offset count corrected to 68 `#define`). No source behavior changed; `./l0fck --test` 22/22 still green.
 - **Restore-Chain Phase 0 live result (A18 Pro, 2026-10-12) — A18 Pro close-out**: The `l0fck/tools/mb2_reachability.py` probe (RSD tunnel up, trusted session) confirms `com.apple.mobilebackup2.shim.remote` **is registered** on the A18 Pro RSD surface, but `StartService` returns **`ServiceProhibited`**. An A/B control (`tools/mb2_control_diag.py`) starting a spread of services over the identical path shows this is **not** mb2-specific and **not** a trust/transport failure: `lockdown.trusted`, `afc`, `notification_proxy` all start, while only the user-session anti-theft services (`mobilebackup2`, `springboardservices`, `installation_proxy`) are `ServiceProhibited` — the device's own anti-theft / user-service gate on a **locked, Find My ON** device, enforced at StartService (earlier than the `MBErrorDomain/211` restore-time gate). Because the device is locked and Find My cannot be turned off from the host (the only Find My off path, Vol Down + Power → "Turn off", only deactivates localization at shutdown and powers the device off), **this gate cannot be cleared from the host side**. Outcome: chain remains **A13-class only** on this host; A18 Pro marked "mb2 present on RSD but `ServiceProhibited` at StartService on a locked + Find My device." Phase 1 (CoreDevice mb2 sidecar + l0fck C rewiring) is **not built** — it would hit `ServiceProhibited` at service start. Transport is proven working (RSD up, trusted, AFC live); the block is the device's own anti-theft gate. Full detail: `RESEARCH/IMPORTANT TO CHECK/research-2026-09-16-afc-26.6.1.md` (Session 4 addendum) + `l0fck/tools/mb2_reachability_<date>_<time>.txt`.
 - **Restore-Chain transport split + CoreDevice Phase 0 probe (A18 Pro)**: Live A18 Pro (UDID `00008140-0011285A20E3C01C`, iOS 26.6.1, paired host) shows `com.apple.mobilebackup2` is **not registered** on the legacy-lockdown surface — `idevicebackup2` reaches TLS + `notification_proxy` + `afc`, then `StartService com.apple.mobilebackup2` fails `InvalidService`. This is a device-side **registration gate**, not a pairing/SSL bug (host is paired). **Red-herring correction**: l0fck's earlier `[lockdown=-23]` came from a session-less `lockdownd_client_new` probe (returns -23 by construction); the real gate is `InvalidService` (`LOCKDOWN_E_INVALID_SERVICE`, -27) surfaced as `-256` (`SERVICE_E_UNKNOWN_ERROR`) at the mb2 layer. `com.apple.afc` remains live on the A18 Pro, so the stage-4 AFC hard gate and stages 5–6 are unaffected. Since libimobiledevice has no CoreDevice/RSD transport, the A18 Pro path targets the **CoreDevice RSD transport** (service `com.apple.mobilebackup2.shim.remote`) via a `pymobiledevice3` sidecar. New `l0fck/tools/mb2_reachability.py` (read-only RSD probe → `REACHABLE` / `NOT_IN_RSD_LIST` / `CONNECT_FAILED`; venv `l0fck/tools/.venv`) gates Phase 1. Legacy C mb2 path (`src/backup/mb2_restore.c`) is kept untouched for A13-class devices; transport is selected by target. Full detail: `RESEARCH/IMPORTANT TO CHECK/research-2026-09-16-afc-26.6.1.md` (Session 4 addendum).
 - **Restore-Chain (Menu 6.8)**: `MobileBackup2` restore-staging path-traversal chain (CVE-2026-84598 class, A18 Pro / iOS 26.6.1). Drives a full `com.apple.mobilebackup2` session over USB lockdown (no kernel exploit, no Wi-Fi): DL version exchange + `Hello` `[2.0, 2.1]`, synthesized `Manifest.plist` (Version `8.0` / `SystemDomainsVersion` `19.0`), and a synthesized `.mbdb` stream whose phase-1 domain-escape entries stage canary files at the `/var/mobile/Media` in-jail root and `/var/tmp`. A hard gate (stage 4) re-reads the canary over plain AFC before any unlock stage; on confirmation it reuses the proven post-exploit stack (flag injection, offline A18 Pro activation, SpringBoard/Setup preferences, 14 Darwin dismissal bursts, respring) to reach the unlocked Home Screen. `MBErrorDomain/211` Find My gate retries up to 3 rounds (manual operator pre-gate); daemon-wedge recovery via reboot prompt. New module `src/backup/mb2_restore.c` + `include/backup/mb2_restore.h`. CLI: `--restore-chain` / `--restore-probe` (probe = stages 0-3 only).

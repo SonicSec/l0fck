@@ -1,2 +1,6 @@
 # CoreDevice transport tooling: pymobiledevice3 venv (Phase 0/1 sidecar deps)
 tools/.venv/
+
+# Python cache (tools diagnostics)
+__pycache__/
+*.pyc
