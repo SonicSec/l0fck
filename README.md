@@ -2,6 +2,13 @@
 
 **`l0fck`** is a standalone, clean-slate security research and activation analysis tool purpose-built for the **iPhone 16 Pro & iPhone 16 Pro Max** (Apple A18 Pro SoC, CPID `0x8140`, `iPhone17,1` / `iPhone17,2`) running **iOS 26.6.1** (Build `23G83`).
 
+> ### ⚠️ Research only — do not use off-target
+> **Everything in this repository is for defensive and academic research
+> purposes only.** All work has been **lab-tested in a secure, isolated
+> environment**. **Do not use this research to build custom attack chains.**
+> **Do not run this program in an unsecured environment or against a device
+> you do not own and are not authorized to test.**
+
 ---
 
 ## Key Highlights & Vulnerability Vectors
