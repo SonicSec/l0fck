@@ -42,8 +42,9 @@ SRCS = src/main.c \
        src/exploits/captive_http.c \
        src/exploits/captive_payloads.c \
        src/exploits/captive_tls.c \
-       src/exploits/appleave2_exploit.c \
-       src/exploits/appleave2_device_payload.c
+        src/exploits/appleave2_exploit.c \
+        src/exploits/appleave2_device_payload.c \
+        src/backup/mb2_restore.c
 
 OBJS = $(SRCS:.c=.o)
 TARGET = l0fck

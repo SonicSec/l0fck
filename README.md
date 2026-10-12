@@ -26,8 +26,10 @@
    Pure over-the-air exploit chain for unactivated devices in Setup Assistant. No USB cable required. Launches captive DNS/HTTP/TLS servers to intercept Apple CNA probes, pops up WebSheet, and runs WebCodecs `VideoEncoder` race to trigger `AppleAVE2Driver` `sEnc.eType`/`eEncType` state desynchronization (CVE-2026-84607) directly from the captive browser context. On kernel R/W win: injects CoreTrust trust cache, disarms AMFI/SEP, transitions CNA to success, serves synthesized activation record, and optionally (on USB attach) injects flags + stages preferences + dispatches Darwin dismissal notifications → unlocked Home Screen.
 10. **Sovereign-Chain & Sovereign-Lite Hybrid Bypass**:
     Userspace security-degradation chains that apply dual-vector memory pressure (NECP + IOSurface) and AI guardrail AFC overrides before activation bypass. Sovereign-Chain runs the full 5-stage bypass; Sovereign-Lite pivots to lockdown injection, notification burst, and respring without activation/race stages.
-11. **On-Device Payload Framework (V-047, PMAP, AppleAVE2)**:
-    Cross-compilation and orchestration of on-device payloads for iOS 26.6.1 A18 Pro. Builds `.app` bundles via `iphoneos` SDK, stages to device via AFC, and polls result plists for kernel R/W readiness. Includes V-047 (AppleJPEGDriver OOB groom/fire), PMAP (pmap_tte_remove PUAF/reclaim), and AppleAVE2 (eEncType race) payloads.
+ 11. **On-Device Payload Framework (V-047, PMAP, AppleAVE2)**:
+     Cross-compilation and orchestration of on-device payloads for iOS 26.6.1 A18 Pro. Builds `.app` bundles via `iphoneos` SDK, stages to device via AFC, and polls result plists for kernel R/W readiness. Includes V-047 (AppleJPEGDriver OOB groom/fire), PMAP (pmap_tte_remove PUAF/reclaim), and AppleAVE2 (eEncType race) payloads.
+ 12. **Restore-Chain (MobileBackup2 Restore-Staging Traversal, CVE-2026-84598 class)**:
+     USB-only (no Wi-Fi, no kernel exploit) chain that drives a full `com.apple.mobilebackup2` restore session over lockdown: DL version exchange → `Hello` (SupportedProtocolVersions `[2.0, 2.1]`) → serves a synthesized `Manifest.plist` (Version `8.0`, `SystemDomainsVersion` `19.0`) → streams a synthesized `.mbdb` whose phase-1 entries use domain escapes (`SysContainerDomain-../..`) to stage canary files at the `/var/mobile/Media` in-jail root and `/var/tmp`, and phase-2 entries plant purplebuddy / SetupAssistant unlock plists. A hard gate re-reads the phase-1 canary over plain AFC before any unlock stage runs (parse-accept alone is not a write primitive); on confirmation it reuses the proven post-exploit stack (flag injection, offline activation, Darwin dismissal burst, respring) to reach the unlocked Home Screen.
 
 ---
 
@@ -72,6 +74,7 @@ graph TD
     K --> K3[Sovereign-Lite: Injection + Notification]
     K --> K4[Neo-Chain: Kernel R/W + AMFI + SEP]
     K --> K5[SetupAssistant-Chain: Wi-Fi Portal + AppleAVE2]
+    K --> K6[Restore-Chain: MobileBackup2 Restore-Staging Traversal]
 
     K4 --> L1[AppleAVE2 CVE-2026-84607 eEncType Race]
     K4 --> L2[AppleJPEGDriver V-047 OOB]
@@ -84,6 +87,12 @@ graph TD
     K5 --> M2[WebSheet WebCodecs VideoEncoder Race]
     K5 --> M3[Over-The-Air Telemetry & kbase Leak]
     K5 --> M4["Post-Exploit: AMFI/SEP + CNA Success + Activation"]
+
+    K6 --> P1[MB2 Session: DL version + Hello 2.0/2.1]
+    K6 --> P2[Manifest.plist 8.0 + .mbdb domain-escape stream]
+    K6 --> P3[211 Find My Gate retry + wedge recovery]
+    K6 --> P4[Hard Gate: plain-AFC canary = confirmed write]
+    K6 --> P5["Post-Exploit: flags + offline activation + Darwin burst + respring"]
 
     A --> N[On-Device Payloads]
     N --> N1[V-047 Payload: check/groom/fire/full]
@@ -134,12 +143,14 @@ l0fck/
 │   │   ├── afc_manager.h             # /var/mobile/Media/ read/write operations
 │   │   ├── flag_injector.h           # PurpleBuddy persistent key injection
 │   │   └── crash_reporter.h          # Unauthenticated .IPS crash log fetcher & parser
-│   ├── activation/
-│   │   ├── mobileactivation.h        # iOS 26.6.1 mobileactivation client
-│   │   ├── albert_client.h           # Albert DRM handshake client
-│   │   ├── record_a18.h              # A18 Pro activation record synthesizer
-│   │   └── ingest_parser.h           # IngestBody & CollectionBlob JSON parser
-│   └── exploits/
+ │   ├── activation/
+ │   │   ├── mobileactivation.h        # iOS 26.6.1 mobileactivation client
+ │   │   ├── albert_client.h           # Albert DRM handshake client
+ │   │   ├── record_a18.h              # A18 Pro activation record synthesizer
+ │   │   └── ingest_parser.h           # IngestBody & CollectionBlob JSON parser
+ │   ├── backup/
+ │   │   └── mb2_restore.h             # Restore-Chain: MB2 session, manifest/mbdb synth, chain API
+ │   └── exploits/
 │       ├── preboard_poc.h            # Vulnerability #23 preboardservice_v2 PoC
 │       ├── preboard_triage.h         # Live crash triage & register analyzer
 │       ├── preboard_exploit.h        # Weaponized preboard privilege escalation
@@ -166,7 +177,7 @@ l0fck/
 │       ├── captive_payloads.h        # WebSheet UI, JS telemetry suite, & mobileconfig stubs
 │       └── captive_tls.h             # TLS handshake & certificate pinning inspector
 ├── src/
-│   ├── main.c                        # Unified CLI, self-test suite (16/16), and command dispatch
+│   ├── main.c                        # Unified CLI, self-test suite (22/22), and command dispatch
 │   ├── core/
 │   │   ├── target.c
 │   │   ├── log.c
@@ -182,12 +193,14 @@ l0fck/
 │   │   ├── afc_manager.c
 │   │   ├── flag_injector.c
 │   │   └── crash_reporter.c
-│   ├── activation/
-│   │   ├── mobileactivation.c
-│   │   ├── albert_client.c
-│   │   ├── record_a18.c
-│   │   └── ingest_parser.c
-│   └── exploits/
+ │   ├── activation/
+ │   │   ├── mobileactivation.c
+ │   │   ├── albert_client.c
+ │   │   ├── record_a18.c
+ │   │   └── ingest_parser.c
+ │   ├── backup/
+ │   │   └── mb2_restore.c             # Restore-Chain: MB2 restore-staging traversal, manifest/mbdb, 211 gate
+ │   └── exploits/
 │       ├── preboard_poc.c
 │       ├── preboard_triage.c
 │       ├── preboard_exploit.c
@@ -292,8 +305,10 @@ The interactive interface is organized into grouped sections with confirmation s
 | | 3 | Sovereign-Chain (Hybrid Security Degradation) | `--sovereign` |
 | | 4 | Sovereign-Lite (Injection + Notification) | `--sovereign-lite` |
 | | 5 | Neo-Chain (Kernel Exploitation Bypass) | `--neo-chain` |
-| | 6 | SetupAssistant-Chain (Wi-Fi Portal, WebSheet & AppleAVE2 Video Kernel Exploit) | `--setup-assistant-chain` |
-| **7. Diagnostics** | 1 | Run Embedded Self-Tests (16/16 Verification) | `--test` |
+ | | 6 | SetupAssistant-Chain (Wi-Fi Portal, WebSheet & AppleAVE2 Video Kernel Exploit) | `--setup-assistant-chain` |
+ | | 7 | GlyphGrift-Chain (CVE-2026-86950 CoreGraphics PDF OOB Write) | `--glyphgrift-chain` |
+ | | 8 | Restore-Chain (MobileBackup2 Restore-Staging Traversal) | `--restore-chain` / `--restore-probe` |
+ | **7. Diagnostics** | 1 | Run Embedded Self-Tests (22/22 Verification) | `--test` |
 | | 2 | Test Kernel Exploit Primitive (V-047 / MCC) | `--test-kernel-exploit` |
 | | 3 | Test AMFI / CoreTrust Bypass | `--test-amfi-bypass` |
 
@@ -312,7 +327,8 @@ The interactive interface is organized into grouped sections with confirmation s
 | **Sovereign-Chain** | `--sovereign` | Memory pressure → AI guardrails → bypass-full | No | Yes | Yes |
 | **Sovereign-Lite** | `--sovereign-lite` | Memory pressure → AI guardrails → flag injection → notifications → respring | No | No | Yes |
 | **Neo-Chain** | `--neo-chain` | Recon → kernel R/W → AMFI/CoreTrust → SEP/NVRAM → persistence → verify | Yes | No | Yes |
-| **SetupAssistant-Chain** | `--setup-assistant-chain` | DNS/HTTP intercept → WebSheet → AppleAVE2 race → kernel R/W → AMFI/SEP → CNA success → activation → respring | Yes | No | **No** (Wi-Fi only) |
+ | **SetupAssistant-Chain** | `--setup-assistant-chain` | DNS/HTTP intercept → WebSheet → AppleAVE2 race → kernel R/W → AMFI/SEP → CNA success → activation → respring | Yes | No | **No** (Wi-Fi only) |
+ | **Restore-Chain** | `--restore-chain` | MB2 session → manifest/.mbdb traversal → 211 gate → hard AFC gate → unlock artifacts → flag inject + offline activation + Darwin burst + respring | No | No | Yes (USB only) |
 
 ### Neo-Chain Stages (`--neo-chain`)
 
@@ -335,8 +351,29 @@ Stage 3: Recon & Capability Audit (probes: SAB, WASM, Timers, schemes)
 Stage 4: Probes Complete (video_encoder_probe, capability_probe, jsc_watchpoint_oom)
 Stage 5: AppleAVE2 Portal Race (WebCodecs VideoEncoder eEncType desync via Wi-Fi)
 Stage 6: Kernel R/W Won → AMFI/CoreTrust/SEP → CNA Success Release
-Stage 7: Optional USB Attachment: Flag injection + Activation record + 14 Darwin broadcasts → Home Screen
+ Stage 7: Optional USB Attachment: Flag injection + Activation record + 14 Darwin broadcasts → Home Screen
 ```
+
+### Restore-Chain Stages (`--restore-chain`)
+
+```
+Stage 0: Preflight (A18 Pro / iOS 26.6.1 gate; Find My iPhone manual OFF step)
+Stage 1: MB2 Session (com.apple.mobilebackup2, DL version exchange v400/0, "Hello" [2.0, 2.1])
+        (transport by target: A13-class -> legacy lockdown; A18 Pro -> CoreDevice RSD,
+         service com.apple.mobilebackup2.shim.remote via pymobiledevice3 sidecar)
+Stage 2: Manifest + .MBDB Stream (Manifest.plist 8.0 / SystemDomainsVersion 19.0;
+         phase-1 domain-escape canaries → /var/mobile/Media & /var/tmp)
+Stage 3: 211 Find My Gate (MBErrorDomain/211 retry, max 3 rounds; daemon wedge → reboot recovery)
+Stage 4: HARD GATE (re-read phase-1 canary over plain AFC = confirmed arbitrary write;
+         stops honestly if parse-accept only)
+Stage 5: Unlock Artifacts (purplebuddy / SetupAssistant plists planted in same restore pass)
+Stage 6: Finalize (lockdown flag injection + offline A18 Pro activation + SpringBoard/Setup
+         preferences + 14 Darwin dismissal bursts + respring → unlocked Home Screen)
+```
+
+> **Find My prerequisite**: before running the chain, disable Find My on the device (Vol Down + Power → "Turn off" screen → Find My off button). The chain retries automatically if `MBErrorDomain/211` fires, but a manual pre-gate is prompted on interactive TTY. Message dumps land in `/tmp/l0fck-restore/`. `--restore-probe` runs Stages 0–3 only (protocol validation, no unlock).
+>
+> **A18 Pro transport prerequisite**: on the A18 Pro the legacy-lockdown `com.apple.mobilebackup2` service is **not registered** (it fails `InvalidService` even when paired — see `RESEARCH/IMPORTANT TO CHECK/research-2026-09-16-afc-26.6.1.md`, Session 4 addendum). The mb2 session therefore runs over the **CoreDevice RSD transport** (service `com.apple.mobilebackup2.shim.remote`), driven by a bundled `pymobiledevice3` sidecar (`l0fck/tools/mb2_coredevice.py`) once the Phase 0 reachability probe returns `REACHABLE`. The host must be paired + trusted **and** CoreDevice-paired (Developer Mode on; `l0fck/tools/.venv` with `pymobiledevice3` installed) for the A18 Pro. A13-class devices use the legacy lockdown path unchanged.
 
 Blocked exploit paths (DarkSword pe_v2, PUAF, `proc.p_flag`, IOMFB EAN, mobileactivationd patch) are tracked in `PLAN/awaiting_offsets.txt`.
 
@@ -415,7 +452,19 @@ sudo ./l0fck --setup-assistant-chain
 ./l0fck --setup-assistant-chain --captive-server 8080 --captive-dns-port 5353 --captive-tls-port 8443
 ```
 
-### 6. On-Device Payload Orchestration
+### 6. Restore-Chain (MobileBackup2 Restore-Staging Traversal)
+```bash
+# Full chain: stages 0-6, unlock to Home Screen (USB required, A18 Pro / iOS 26.6.1)
+./l0fck --restore-chain
+
+# Probe mode: stages 0-3 only (protocol validation, no unlock stages)
+./l0fck --restore-probe
+```
+> **Prerequisite**: Find My iPhone must be OFF on the device before running. The chain prompts a manual pre-gate on a TTY and retries automatically on `MBErrorDomain/211`.
+>
+> **Transport (A18 Pro)**: the mb2 session runs over the CoreDevice RSD transport (`com.apple.mobilebackup2.shim.remote`) via a `pymobiledevice3` sidecar; A13-class devices use the legacy lockdown path. **Status**: legacy path validated on A13 (2026-09-16); on the A18 Pro the mb2 service is **registered** on the RSD surface but `StartService` returns `ServiceProhibited` on a **passcode-locked + Find My ON** device (A/B-confirmed it is the anti-theft gate, not a trust/transport failure — AFC + `lockdown.trusted` still start). Since Find My cannot be turned off on a locked device from the host, the A18 Pro target is **close-out** (chain is A13-class only); Phase 1 sidecar + l0fck rewiring is not built. The reachability probe `l0fck/tools/mb2_reachability.py` (venv `l0fck/tools/.venv`) re-tests on an unlocked + Find My OFF device.
+
+### 7. On-Device Payload Orchestration
 ```bash
 # V-047 AppleJPEGDriver: build, deploy, and run on-device
 ./l0fck --build-v047-payload
@@ -434,7 +483,7 @@ sudo ./l0fck --setup-assistant-chain
 ./l0fck --appleave2-status            # (alias: --pull-appleave2-result)
 ```
 
-### 7. Preboard Exploitation & Triage Tools
+### 8. Preboard Exploitation & Triage Tools
 ```bash
 # Trigger preboard crash PoC (Vulnerability #23)
 ./l0fck --crash-preboard
@@ -452,15 +501,15 @@ sudo ./l0fck --setup-assistant-chain
 ./l0fck --dismiss-setup
 ```
 
-### 8. Lockdown SSL Bypass
+### 9. Lockdown SSL Bypass
 ```bash
 # Test unauthenticated lockdown SSL bypass & host trust traversal
 ./l0fck --test-lockdown-bypass
 ```
 
-### 9. General Diagnostics & Exploitation Modules
+### 10. General Diagnostics & Exploitation Modules
 ```bash
-# Run embedded self-tests (16/16 test verification, host-only)
+# Run embedded self-tests (22/22 test verification, host-only)
 ./l0fck --test
 
 # Detect connected device and evaluate A18 Pro / iOS 26.6.1 compatibility
@@ -497,7 +546,7 @@ sudo ./l0fck --setup-assistant-chain
 
 ---
 
-## Self-Test Suite (16/16)
+## Self-Test Suite (22/22)
 
 The embedded self-test framework validates all major subsystems without requiring a connected device:
 
@@ -519,6 +568,12 @@ The embedded self-test framework validates all major subsystems without requirin
 | 14 | SetupAssistant Activation & Force-Success Engine | Post-exploit activation record injection and CNA transition |
 | 15 | Stage 6 KASLR Slide & Slid Addressing | KASLR slide computation and slid offset verification |
 | 16 | Stage-6 Synchronous KRW HTTP C2 Bridge & Dynamic Discovery | Full KRW bridge test with simulated allproc walk, PAC stripping, and DeviceTree/PTOV resolution |
+| 17 | GlyphGrift PDF Payload Existence & Telemetry Structure | Validates GlyphGrift PDF payloads and telemetry structure |
+| 18 | GlyphGrift Exploit Telemetry Structure & PDF Variants | crash≠krw_ready semantics, k128/k192 PDF variants |
+| 19 | GlyphGrift KASLR Anchor Table & kslide Recovery (D2) | Anchor table consistency and kslide recovery |
+| 20 | GlyphGrift Sentinel Canary Read-Back Telemetry | Sentinel canary parse (Phase 4) |
+| 21 | GlyphGrift Renderer Heartbeat & Leak-Confidence Gate | Renderer heartbeat lifecycle + leak-confidence gating |
+| 22 | Restore-Chain Manifest/MBDB Synthesizer & Traversal Round-Trip | Manifest bplist schema + .mbdb synth/parse round-trip with domain-escape traversal |
 
 ```bash
 ./l0fck --test
@@ -560,6 +615,10 @@ Unresolved offsets (`kcall_return` gadget, PPL symbols, SEP mailbox, IOMFB EAN, 
 
 ## Recent Changes
 
+- **Restore-Chain Phase 0 live result (A18 Pro, 2026-10-12) — A18 Pro close-out**: The `l0fck/tools/mb2_reachability.py` probe (RSD tunnel up, trusted session) confirms `com.apple.mobilebackup2.shim.remote` **is registered** on the A18 Pro RSD surface, but `StartService` returns **`ServiceProhibited`**. An A/B control (`tools/mb2_control_diag.py`) starting a spread of services over the identical path shows this is **not** mb2-specific and **not** a trust/transport failure: `lockdown.trusted`, `afc`, `notification_proxy` all start, while only the user-session anti-theft services (`mobilebackup2`, `springboardservices`, `installation_proxy`) are `ServiceProhibited` — the device's own anti-theft / user-service gate on a **locked, Find My ON** device, enforced at StartService (earlier than the `MBErrorDomain/211` restore-time gate). Because the device is locked and Find My cannot be turned off from the host (the only Find My off path, Vol Down + Power → "Turn off", only deactivates localization at shutdown and powers the device off), **this gate cannot be cleared from the host side**. Outcome: chain remains **A13-class only** on this host; A18 Pro marked "mb2 present on RSD but `ServiceProhibited` at StartService on a locked + Find My device." Phase 1 (CoreDevice mb2 sidecar + l0fck C rewiring) is **not built** — it would hit `ServiceProhibited` at service start. Transport is proven working (RSD up, trusted, AFC live); the block is the device's own anti-theft gate. Full detail: `RESEARCH/IMPORTANT TO CHECK/research-2026-09-16-afc-26.6.1.md` (Session 4 addendum) + `l0fck/tools/mb2_reachability_<date>_<time>.txt`.
+- **Restore-Chain transport split + CoreDevice Phase 0 probe (A18 Pro)**: Live A18 Pro (UDID `00008140-0011285A20E3C01C`, iOS 26.6.1, paired host) shows `com.apple.mobilebackup2` is **not registered** on the legacy-lockdown surface — `idevicebackup2` reaches TLS + `notification_proxy` + `afc`, then `StartService com.apple.mobilebackup2` fails `InvalidService`. This is a device-side **registration gate**, not a pairing/SSL bug (host is paired). **Red-herring correction**: l0fck's earlier `[lockdown=-23]` came from a session-less `lockdownd_client_new` probe (returns -23 by construction); the real gate is `InvalidService` (`LOCKDOWN_E_INVALID_SERVICE`, -27) surfaced as `-256` (`SERVICE_E_UNKNOWN_ERROR`) at the mb2 layer. `com.apple.afc` remains live on the A18 Pro, so the stage-4 AFC hard gate and stages 5–6 are unaffected. Since libimobiledevice has no CoreDevice/RSD transport, the A18 Pro path targets the **CoreDevice RSD transport** (service `com.apple.mobilebackup2.shim.remote`) via a `pymobiledevice3` sidecar. New `l0fck/tools/mb2_reachability.py` (read-only RSD probe → `REACHABLE` / `NOT_IN_RSD_LIST` / `CONNECT_FAILED`; venv `l0fck/tools/.venv`) gates Phase 1. Legacy C mb2 path (`src/backup/mb2_restore.c`) is kept untouched for A13-class devices; transport is selected by target. Full detail: `RESEARCH/IMPORTANT TO CHECK/research-2026-09-16-afc-26.6.1.md` (Session 4 addendum).
+- **Restore-Chain (Menu 6.8)**: `MobileBackup2` restore-staging path-traversal chain (CVE-2026-84598 class, A18 Pro / iOS 26.6.1). Drives a full `com.apple.mobilebackup2` session over USB lockdown (no kernel exploit, no Wi-Fi): DL version exchange + `Hello` `[2.0, 2.1]`, synthesized `Manifest.plist` (Version `8.0` / `SystemDomainsVersion` `19.0`), and a synthesized `.mbdb` stream whose phase-1 domain-escape entries stage canary files at the `/var/mobile/Media` in-jail root and `/var/tmp`. A hard gate (stage 4) re-reads the canary over plain AFC before any unlock stage; on confirmation it reuses the proven post-exploit stack (flag injection, offline A18 Pro activation, SpringBoard/Setup preferences, 14 Darwin dismissal bursts, respring) to reach the unlocked Home Screen. `MBErrorDomain/211` Find My gate retries up to 3 rounds (manual operator pre-gate); daemon-wedge recovery via reboot prompt. New module `src/backup/mb2_restore.c` + `include/backup/mb2_restore.h`. CLI: `--restore-chain` / `--restore-probe` (probe = stages 0-3 only).
+- **Self-test suite expanded to 22/22**: Added Test 22 (Restore-Chain manifest/mbdb synthesizer schema + .mbdb round-trip with domain-escape traversal + garbage reject) and prior GlyphGrift tests (17-21).
 - **SetupAssistant-Chain (Menu 6.6)**: Pure over-the-air exploit chain via Wi-Fi Captive Portal & WebSheet. Launches DNS/HTTP/TLS servers, forces WebSheet on unactivated iPhone, executes CVE-2026-84607 AppleAVE2 eEncType race via WebCodecs `VideoEncoder`, receives kernel R/W telemetry over Wi-Fi, and optionally completes activation on USB attach. No USB cable required for exploit delivery.
 - **AppleAVE2 CVE-2026-84607 integration**: Replaced V-047/MCC as Neo-Chain primary kernel R/W primitive. New exploit type `KEXPLOIT_APPLEAVE2_CVE_2026_84607` exploits `com.apple.driver.AppleAVE2` state management race condition via concurrent `encoder.configure()` codec switching and `encoder.encode()` frame dispatch.
 - **WebSheet probe payloads**: New `payloads/websheet/` directory with `loader.js` orchestrator, `manifest.json` probe catalog, and JavaScript probes (`appleave2_portal_race.js`, `video_encoder_probe.js`, `capability_probe.js`, `jsc_watchpoint_oom.js`).

@@ -1,0 +1,108 @@
+l0fck Restore-Chain MobileBackup2 reachability probe
+date: 2026-10-12T04:45:00.734764
+target udid: 00008140-0011285A20E3C01C
+pymobiledevice3: 11.27.2
+candidates: com.apple.mobilebackup2.shim.remote, com.apple.mobilebackup2, com.apple.mobile.mobilebackup2
+
+rsd udid: 00008140-0011285A20E3C01C
+product_type: iPhone17,1
+os_version: 26.6.1 build 23G83
+
+rsd services (59):
+  - com.apple.GPUTools.MobileService.shim.remote  (port=49284)
+  - com.apple.PurpleReverseProxy.Conn.shim.remote  (port=49287)
+  - com.apple.PurpleReverseProxy.Ctrl.shim.remote  (port=49329)
+  - com.apple.RestoreRemoteServices.restoreserviced  (port=49334)
+  - com.apple.accessibility.axAuditDaemon.remoteserver.shim.remote  (port=49288)
+  - com.apple.afc.shim.remote  (port=49312)
+  - com.apple.amfi.lockdown.shim.remote  (port=49330)
+  - com.apple.atc.shim.remote  (port=49316)
+  - com.apple.atc2.shim.remote  (port=49297)
+  - com.apple.backgroundassets.lockdownservice.shim.remote  (port=49304)
+  - com.apple.bluetooth.BTPacketLogger.shim.remote  (port=49319)
+  - com.apple.carkit.remote-iap.service  (port=49305)
+  - com.apple.carkit.service.shim.remote  (port=49292)
+  - com.apple.commcenter.mobile-helper-cbupdateservice.shim.remote  (port=49295)
+  - com.apple.companion_proxy.shim.remote  (port=49299)
+  - com.apple.corecaptured.remoteservice  (port=49306)
+  - com.apple.crashreportcopymobile.shim.remote  (port=49283)
+  - com.apple.crashreportmover.shim.remote  (port=49327)
+  - com.apple.dt.remoteFetchSymbols  (port=49336)  features=['com.apple.dt.remoteFetchSymbols.dyldSharedCacheFiles']
+  - com.apple.dt.remotepairingdeviced.lockdown.shim.remote  (port=49291)
+  - com.apple.fusion.remote.service  (port=49338)
+  - com.apple.idamd.shim.remote  (port=49298)
+  - com.apple.internal.devicecompute.CoreDeviceProxy  (port=49307)
+  - com.apple.internal.devicecompute.CoreDeviceProxy.shim.remote  (port=49332)
+  - com.apple.internal.dt.coredevice.untrusted.tunnelservice  (port=49337)
+  - com.apple.iosdiagnostics.relay.shim.remote  (port=49328)
+  - com.apple.misagent.shim.remote  (port=49315)
+  - com.apple.mobile.MCInstall.shim.remote  (port=49314)
+  - com.apple.mobile.assertion_agent.shim.remote  (port=49290)
+  - com.apple.mobile.diagnostics_relay.shim.remote  (port=49321)
+  - com.apple.mobile.file_relay.shim.remote  (port=49333)
+  - com.apple.mobile.heartbeat.shim.remote  (port=49325)
+  - com.apple.mobile.house_arrest.shim.remote  (port=49322)
+  - com.apple.mobile.insecure_notification_proxy.remote  (port=49339)
+  - com.apple.mobile.insecure_notification_proxy.shim.remote  (port=49289)
+  - com.apple.mobile.installation_proxy.shim.remote  (port=49286)
+  - com.apple.mobile.lockdown.remote.trusted  (port=49340)
+  - com.apple.mobile.lockdown.remote.untrusted  (port=49309)
+  - com.apple.mobile.mobile_image_mounter.shim.remote  (port=49317)
+  - com.apple.mobile.notification_proxy.remote  (port=49310)
+  - com.apple.mobile.notification_proxy.shim.remote  (port=49324)
+  - com.apple.mobile.storage_mounter_proxy.bridge  (port=49341)
+  - com.apple.mobileactivationd.shim.remote  (port=49323)
+  - com.apple.mobilebackup2.shim.remote  (port=49285)
+  - com.apple.mobilesync.shim.remote  (port=49320)
+  - com.apple.modelmanager.remote  (port=49311)
+  - com.apple.os_trace_relay.shim.remote  (port=49331)
+  - com.apple.osanalytics.logTransfer  (port=49301)
+  - com.apple.pcapd.shim.remote  (port=49326)
+  - com.apple.preboardservice.shim.remote  (port=49294)
+  - com.apple.preboardservice_v2.shim.remote  (port=49318)
+  - com.apple.remote.installcoordination_proxy  (port=49308)
+  - com.apple.security.cryptexd.remote  (port=49302)  features=['CryptexInstall', 'Cryptex1', 'ReadIdentifiers', 'Cryptex1,UseProductClass']
+  - com.apple.springboardservices.shim.remote  (port=49303)
+  - com.apple.streaming_zip_conduit.shim.remote  (port=49300)
+  - com.apple.sysdiagnose.remote  (port=49335)
+  - com.apple.sysdiagnose.remote.trusted  (port=49313)
+  - com.apple.syslog_relay.shim.remote  (port=49296)
+  - com.apple.webinspector.shim.remote  (port=49293)
+
+mobilebackup2 service(s) present: ['com.apple.mobilebackup2.shim.remote']
+probing: com.apple.mobilebackup2.shim.remote
+
+device-link probe: service_start_failed (RSD check-in / StartService): StartServiceError: 
+
+
+VERDICT: CONNECT_FAILED service_start_failed (RSD check-in / StartService): StartServiceError: 
+
+============================================================================
+RAW EVIDENCE (tools/mb2_checkin_diag.py, same session, raw bytes captured
+bypassing pymobiledevice3 parsing):
+
+  [>] RSDCheckin sent:  {Label:l0fck-probe, ProtocolVersion:2, Request:RSDCheckin}
+  [0] < RSDCheckin ack : {'Request': 'RSDCheckin'}
+  [1] < StartService   : {'Error': 'ServiceProhibited',
+                          'Request': 'StartService',
+                          'Service': 'com.apple.mobilebackup2'}
+
+=> The device is REGISTERED-then-REFUSED: the RSD list advertises
+   com.apple.mobilebackup2.shim.remote, but the device returns
+   Error=ServiceProhibited on StartService. This is NOT InvalidService
+   (not-registered), NOT a daemon wedge, NOT a pairing failure.
+
+RSD lockdown state (tools/mb2_fmip_diag.py / all_values, 67 values):
+  HasSiDP=1, HostAttached, TrustedHostAttached, PairRecordProtectionClass=4
+  ActivationState='Unactivated'
+  ProductType=iPhone17,1, ProductVersion=26.6.1, Build=23G83,
+  ModelNumber=MYNG3, HardwareModel=D93AP
+
+=> Host IS paired + trusted. ServiceProhibited on a backup2 service is
+   most classically FIND MY IPHONE ON: the device hard-gates the
+   backup/restore service at StartService when Find My is enabled.
+
+GATE: negative right now, but it is the EXPECTED Find-My gate (the plan's
+explicit prerequisite), not a transport failure. Next action: turn Find My
+iPhone OFF on the device, re-run this probe. REACHABLE -> Phase 1. Still
+ServiceProhibited with Find My OFF -> true negative, document, no Phase 1.

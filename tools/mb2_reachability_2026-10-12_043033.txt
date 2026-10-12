@@ -1,0 +1,92 @@
+l0fck Restore-Chain MobileBackup2 reachability probe
+date: 2026-10-12T04:30:33.725483
+target udid: 00008140-0011285A20E3C01C
+pymobiledevice3: 11.27.2
+candidates: com.apple.mobilebackup2.shim.remote, com.apple.mobilebackup2, com.apple.mobile.mobilebackup2
+
+[*] RSD: establishing via macOS native tunnel (remotepairingd, no root)...
+[*] RSD: native tunnel up; udid=00008140-0011285A20E3C01C addr=('fd3c:3f2e:6fb9::1', 60389)
+rsd udid: 00008140-0011285A20E3C01C
+product_type: iPhone17,1
+os_version: 26.6.1 build 23G83
+
+rsd services (59):
+  - com.apple.GPUTools.MobileService.shim.remote  (port=49240)
+  - com.apple.PurpleReverseProxy.Conn.shim.remote  (port=49271)
+  - com.apple.PurpleReverseProxy.Ctrl.shim.remote  (port=49235)
+  - com.apple.RestoreRemoteServices.restoreserviced  (port=49253)
+  - com.apple.accessibility.axAuditDaemon.remoteserver.shim.remote  (port=49272)
+  - com.apple.afc.shim.remote  (port=49266)
+  - com.apple.amfi.lockdown.shim.remote  (port=49259)
+  - com.apple.atc.shim.remote  (port=49268)
+  - com.apple.atc2.shim.remote  (port=49263)
+  - com.apple.backgroundassets.lockdownservice.shim.remote  (port=49229)
+  - com.apple.bluetooth.BTPacketLogger.shim.remote  (port=49243)
+  - com.apple.carkit.remote-iap.service  (port=49242)
+  - com.apple.carkit.service.shim.remote  (port=49276)
+  - com.apple.commcenter.mobile-helper-cbupdateservice.shim.remote  (port=49237)
+  - com.apple.companion_proxy.shim.remote  (port=49231)
+  - com.apple.corecaptured.remoteservice  (port=49258)
+  - com.apple.crashreportcopymobile.shim.remote  (port=49239)
+  - com.apple.crashreportmover.shim.remote  (port=49264)
+  - com.apple.dt.remoteFetchSymbols  (port=49251)  features=['com.apple.dt.remoteFetchSymbols.dyldSharedCacheFiles']
+  - com.apple.dt.remotepairingdeviced.lockdown.shim.remote  (port=49275)
+  - com.apple.fusion.remote.service  (port=49257)
+  - com.apple.idamd.shim.remote  (port=49230)
+  - com.apple.internal.devicecompute.CoreDeviceProxy  (port=49281)
+  - com.apple.internal.devicecompute.CoreDeviceProxy.shim.remote  (port=49261)
+  - com.apple.internal.dt.coredevice.untrusted.tunnelservice  (port=49252)
+  - com.apple.iosdiagnostics.relay.shim.remote  (port=49234)
+  - com.apple.misagent.shim.remote  (port=49267)
+  - com.apple.mobile.MCInstall.shim.remote  (port=49238)
+  - com.apple.mobile.assertion_agent.shim.remote  (port=49274)
+  - com.apple.mobile.diagnostics_relay.shim.remote  (port=49245)
+  - com.apple.mobile.file_relay.shim.remote  (port=49262)
+  - com.apple.mobile.heartbeat.shim.remote  (port=49250)
+  - com.apple.mobile.house_arrest.shim.remote  (port=49246)
+  - com.apple.mobile.insecure_notification_proxy.remote  (port=49254)
+  - com.apple.mobile.insecure_notification_proxy.shim.remote  (port=49273)
+  - com.apple.mobile.installation_proxy.shim.remote  (port=49248)
+  - com.apple.mobile.lockdown.remote.trusted  (port=49255)
+  - com.apple.mobile.lockdown.remote.untrusted  (port=49283)
+  - com.apple.mobile.mobile_image_mounter.shim.remote  (port=49241)
+  - com.apple.mobile.notification_proxy.remote  (port=49284)
+  - com.apple.mobile.notification_proxy.shim.remote  (port=49249)
+  - com.apple.mobile.storage_mounter_proxy.bridge  (port=49256)
+  - com.apple.mobileactivationd.shim.remote  (port=49247)
+  - com.apple.mobilebackup2.shim.remote  (port=49269)
+  - com.apple.mobilesync.shim.remote  (port=49244)
+  - com.apple.modelmanager.remote  (port=49286)
+  - com.apple.os_trace_relay.shim.remote  (port=49260)
+  - com.apple.osanalytics.logTransfer  (port=49280)
+  - com.apple.pcapd.shim.remote  (port=49265)
+  - com.apple.preboardservice.shim.remote  (port=49278)
+  - com.apple.preboardservice_v2.shim.remote  (port=49270)
+  - com.apple.remote.installcoordination_proxy  (port=49282)
+  - com.apple.security.cryptexd.remote  (port=49228)  features=['CryptexInstall', 'Cryptex1', 'ReadIdentifiers', 'Cryptex1,UseProductClass']
+  - com.apple.springboardservices.shim.remote  (port=49233)
+  - com.apple.streaming_zip_conduit.shim.remote  (port=49232)
+  - com.apple.sysdiagnose.remote  (port=49285)
+  - com.apple.sysdiagnose.remote.trusted  (port=49279)
+  - com.apple.syslog_relay.shim.remote  (port=49236)
+  - com.apple.webinspector.shim.remote  (port=49277)
+
+mobilebackup2 service(s) present: ['com.apple.mobilebackup2.shim.remote']
+probing: com.apple.mobilebackup2.shim.remote
+
+[*] service socket open: com.apple.mobilebackup2.shim.remote @ fd3c:3f2e:6fb9::1:49269
+device-link probe: version_exchange_timeout after 30s (device may be wedged)
+
+VERDICT: CONNECT_FAILED version_exchange_timeout after 30s (device may be wedged)
+
+NOTE (post-run, 2026-10-12): the version_exchange_timeout above is UNRELIABLE.
+The probe opened the service with start_lockdown_service_without_checkin (raw TCP,
+NO RSD check-in handshake). On CoreDevice the device does not emit its first
+device-link message (DLMessageVersionExchange) until the service is started via
+the RSDCheckin -> StartService exchange, so an unchecked-in socket hangs and
+looks like a wedge. The probe was fixed to start the service via
+Mobilebackup2Service (start_lockdown_service include_escrow_bag=True, i.e. the
+canonical check-in path) and must be re-run on a connected device.
+The 59-service enumeration above (including com.apple.mobilebackup2.shim.remote,
+port 49269) is the durable, valid result: the mb2 service IS registered on the
+RSD/CoreDevice surface on A18 Pro / iOS 26.6.1.
