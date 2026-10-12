@@ -1,4 +1,30 @@
+<div align="center">
+
 # `l0fck` — iPhone 16 Pro / A18 Pro / iOS 26.6.1 Dedicated Research Suite
+
+<br>
+
+<img src="img/banner.png" alt="l0fck — Security Research Suite" width="100%">
+
+<br>
+
+<p align="center"><strong><span style="font-size:26px">“ Why have <em>Lock</em> when you can <span style="color:#35E0FF">L0fck</span> ”</span></strong></p>
+
+<br>
+
+<img src="img/logo.png" alt="l0fck logo" width="160" height="160">
+
+<br>
+
+<p align="center">
+  <img src="img/badge-research-only.png" alt="Research Only" height="30">
+  <img src="img/badge-lab-tested.png" alt="Lab Tested" height="30">
+  <img src="img/badge-target.png" alt="iOS 26.6.1 23G83" height="30">
+  <img src="img/badge-hw.png" alt="A18 Pro T8140" height="30">
+  <img src="img/badge-selftest.png" alt="Self-Test 22/22" height="30">
+</p>
+
+</div>
 
 **`l0fck`** is a standalone, clean-slate security research and activation analysis tool purpose-built for the **iPhone 16 Pro & iPhone 16 Pro Max** (Apple A18 Pro SoC, CPID `0x8140`, `iPhone17,1` / `iPhone17,2`) running **iOS 26.6.1** (Build `23G83`).
 
@@ -131,6 +157,10 @@ graph TD
 l0fck/
 ├── Makefile                          # Build configuration linking libimobiledevice, libusb, openssl, curl
 ├── README.md                         # Technical documentation
+├── img/                              # README branding (logo, banner, shields) — cyan accent
+│   ├── logo.png                      # l0fck logo (open padlock + wordmark)
+│   ├── banner.png                    # Hero banner (title + slogan + specs)
+│   └── badge-*.png                   # Research-only / lab-tested / target / hw / self-test shields
 ├── patch_mock.py                     # Runtime plist mock patching utility
 ├── start.sh                          # Interactive grouped terminal menu with confirmation screens
 ├── RESEARCH/                         # Chain & findings reference (read before implementing changes)
@@ -688,6 +718,7 @@ and the refuted claim is marked **superseded**.
 
 ## Recent Changes
 
+- **Public branding + README title section (2026-10-12)**: README title section is now public-ready — hero banner, logo, the slogan citation (“Why have Lock when you can L0fck”), and a row of status shields (Research Only, Lab Tested, iOS 26.6.1·23G83, A18 Pro·T8140, Self-Test 22/22). New `img/` folder with `logo.png` (open padlock + wordmark), `banner.png` (title + slogan + specs), and 5 shield `badge-*.png`. All assets use the menu's bright-cyan accent (`start.sh` `CYAN`). A research-only / lab-tested disclaimer is shown under the title. No source behavior changed.
 - **RESEARCH/ reference folder + `l0fck-research` skill (2026-10-12)**: New `l0fck/RESEARCH/` folder (13 docs) is the canonical per-chain + per-finding reference — one `.md` per implemented chain (bypass-full, sovereign, neo-chain, setup-assistant, glyphgrift, restore-chain) and one per cross-cutting finding (kernel R/W hardening, 26.6.1 T8140 offsets, preboard/VUL 23 D1 dead-end, lockdown SSL bypass, activation ambit/mb2 gates/DFU close-out, zero-fake-success policy). Docs synthesize `PLAN/*.md` + `l0fck/src/**` + live A18 Pro results; refuted "final reports" are marked superseded. A new `l0fck-research` Kilo skill (at `../.agents/skills/l0fck-research/`) mandates reading the relevant RESEARCH doc before implementing changes to an existing chain or a new custom chain. README tree corrected to match source (`tools/`, `RESEARCH/`, `payloads/glyphgrift/`, `preboard_race.c`, `applemcc_exploit.c`, 5 GlyphGrift/KRW WebSheet probes, `payload-glyphgrift` target; kernel-offset count corrected to 68 `#define`). No source behavior changed; `./l0fck --test` 22/22 still green.
 - **Restore-Chain Phase 0 live result (A18 Pro, 2026-10-12) — A18 Pro close-out**: The `l0fck/tools/mb2_reachability.py` probe (RSD tunnel up, trusted session) confirms `com.apple.mobilebackup2.shim.remote` **is registered** on the A18 Pro RSD surface, but `StartService` returns **`ServiceProhibited`**. An A/B control (`tools/mb2_control_diag.py`) starting a spread of services over the identical path shows this is **not** mb2-specific and **not** a trust/transport failure: `lockdown.trusted`, `afc`, `notification_proxy` all start, while only the user-session anti-theft services (`mobilebackup2`, `springboardservices`, `installation_proxy`) are `ServiceProhibited` — the device's own anti-theft / user-service gate on a **locked, Find My ON** device, enforced at StartService (earlier than the `MBErrorDomain/211` restore-time gate). Because the device is locked and Find My cannot be turned off from the host (the only Find My off path, Vol Down + Power → "Turn off", only deactivates localization at shutdown and powers the device off), **this gate cannot be cleared from the host side**. Outcome: chain remains **A13-class only** on this host; A18 Pro marked "mb2 present on RSD but `ServiceProhibited` at StartService on a locked + Find My device." Phase 1 (CoreDevice mb2 sidecar + l0fck C rewiring) is **not built** — it would hit `ServiceProhibited` at service start. Transport is proven working (RSD up, trusted, AFC live); the block is the device's own anti-theft gate. Full detail: `RESEARCH/IMPORTANT TO CHECK/research-2026-09-16-afc-26.6.1.md` (Session 4 addendum) + `l0fck/tools/mb2_reachability_<date>_<time>.txt`.
 - **Restore-Chain transport split + CoreDevice Phase 0 probe (A18 Pro)**: Live A18 Pro (UDID `00008140-0011285A20E3C01C`, iOS 26.6.1, paired host) shows `com.apple.mobilebackup2` is **not registered** on the legacy-lockdown surface — `idevicebackup2` reaches TLS + `notification_proxy` + `afc`, then `StartService com.apple.mobilebackup2` fails `InvalidService`. This is a device-side **registration gate**, not a pairing/SSL bug (host is paired). **Red-herring correction**: l0fck's earlier `[lockdown=-23]` came from a session-less `lockdownd_client_new` probe (returns -23 by construction); the real gate is `InvalidService` (`LOCKDOWN_E_INVALID_SERVICE`, -27) surfaced as `-256` (`SERVICE_E_UNKNOWN_ERROR`) at the mb2 layer. `com.apple.afc` remains live on the A18 Pro, so the stage-4 AFC hard gate and stages 5–6 are unaffected. Since libimobiledevice has no CoreDevice/RSD transport, the A18 Pro path targets the **CoreDevice RSD transport** (service `com.apple.mobilebackup2.shim.remote`) via a `pymobiledevice3` sidecar. New `l0fck/tools/mb2_reachability.py` (read-only RSD probe → `REACHABLE` / `NOT_IN_RSD_LIST` / `CONNECT_FAILED`; venv `l0fck/tools/.venv`) gates Phase 1. Legacy C mb2 path (`src/backup/mb2_restore.c`) is kept untouched for A13-class devices; transport is selected by target. Full detail: `RESEARCH/IMPORTANT TO CHECK/research-2026-09-16-afc-26.6.1.md` (Session 4 addendum).
