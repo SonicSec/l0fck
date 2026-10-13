@@ -1,6 +1,5 @@
 <img src="img/banner-hidden.png" alt="l0fck — Security Research Suite" width="100%">
 <br>
-<br>
 
 <br>
 
