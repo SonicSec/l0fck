@@ -17,6 +17,8 @@
   <img src="img/badge-selftest.png" alt="Self-Test 22/22" height="30">
 </p>
 
+<br>
+
 </div>
 
 **`l0fck`** is a standalone, clean-slate security research and activation analysis tool purpose-built for the **iPhone 16 Pro & iPhone 16 Pro Max** (Apple A18 Pro SoC, CPID `0x8140`, `iPhone17,1` / `iPhone17,2`) running **iOS 26.6.1** (Build `23G83`).
