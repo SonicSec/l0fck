@@ -4,3 +4,10 @@ tools/.venv/
 # Python cache (tools diagnostics)
 __pycache__/
 *.pyc
+
+# CMake build files were intentionally added to the repo
+# You can enable/disable it commenting/uncommenting the following lines
+
+# -- COMMENT/UNCOMMENT THE FOLLOWING LINES
+*.o
+l0fck
