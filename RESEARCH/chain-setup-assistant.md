@@ -69,9 +69,10 @@ diagnostic:"Kernel pointer leak confirmed via slice desync at offset 1378
 V-047/MCC/PMAP were stub or offset-blocked (see
 `findings-kernel-rw-hardening.md`).
 
-## Known limits
+## Known limits & November 2026 Ground-Truth Findings
 
-- Stage 6 kernel writes were simulated until the C2 bridge + Stage-6 fixes
-  landed; full activation still requires the SEP/NVRAM offset work (see
-  `findings-kernel-offsets.md`).
+- **AVE2 AssignUnitPreempt OOB Read (CVE-2026-112466) Status**: Binary analysis of the target iOS 26.6.1 kext (`AssignUnitPreempt` at file offset `0x150228`) confirmed that the loaded OOB value `x8` at `0x53aa2c` is used exclusively as a branch comparand (`cmp x10, x8`). It is immediately overwritten on both branch paths and never flows into `CMSampleBuffer` or output NAL units. The OOB value cannot serve as a reliable userspace KASLR leak.
+- **AVE2 DPB OOB Write Blocked by DART**: The AVE2 DPB OOB write path (`NTL=2057`) is blocked by hardware: the Apple DART IOMMU triggers a `DARTHwException` at the kext boundary before memory corruption can be utilized for an arbitrary kernel write primitive (verified with 0xAA pre-fill surface checks).
+- **AVE2 Mutation Race (CVE-2026-84607)**: AlphaLayerID=255 parameter panics are secondary DART faults rather than controllable kernel write primitives on A18 Pro.
+- Stage 6 kernel writes remain blocked on genuine arbitrary kernel R/W and unresolved SEP/NVRAM offsets on iOS 26.6.1 (see `findings-kernel-offsets.md`).
 - Stage 8 needs USB at the end; pure-OTA activation is not yet achievable.

@@ -97,7 +97,14 @@ and no kbase yet.**
 ## Gates & telemetry
 
 - Gate 0: local `render.c` crash of the research PDF (host reproducible).
-- Gate 1: trigger fires (heartbeat-gap). Gate 2: one real read-back or
+- Gate 1: trigger fires (heartbeat-gap). Gate 2: one real read-back or canary.
+
+## CVE-2026-112611 Comparison & Userspace Demarcation
+
+Research into `CVE-2026-112611` (fixed in iOS 27.2, advisory HT149230) provides critical context on CoreGraphics PDF vulnerabilities:
+- **Root Defect**: `_cg_shading_type5_draw` fails to bounds-check Gouraud ShadingType 5 `/Function` components against color space dimension, resulting in a controlled 4-byte zero store (`str wzr, [x22, #0xc]`) in `CGPDFService.xpc`.
+- **Architectural Boundary**: Like `CVE-2026-86950` (GlyphGrift), `CVE-2026-112611` executes strictly inside the userspace QuickLook PDF renderer or WebSheet rendering context.
+- **No Path to Kernel or Activation Bypass**: A userspace PDF zero-write or heap corruption does not defeat SPTM, cannot extract PAC keys, does not provide kernel R/W, and cannot satisfy the SEP local-nonce validation required for activation. Both vectors represent userspace renderer corruption primitives rather than complete jailbreak or activation chains.
   documented crash. Gate 3: `gVirtBase` read matches KASLR-adjusted value.
 - **Sentinel canary read-back** (Phase 4 of fix plan): hardcoded 0xA5
   buffer in a dense, no-hole spray immediately before the trigger so a

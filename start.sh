@@ -155,10 +155,15 @@ EOF
 
 print_doc_neo_chain() {
     cat <<'EOF'
-Neo-Chain uses AppleAVE2 CVE-2026-84607 eEncType race condition 
-for kernel R/W on A18 Pro. Stages: kernel R/W, AMFI/CoreTrust bypass 
-(trust_cache_rt), SEP/NVRAM, persistence, verify. Blocked stages fall 
-back per awaiting_offsets.txt.
+Neo-Chain uses kernel exploitation primitives for privilege escalation on A18 Pro.
+Stages: kernel R/W, AMFI/CoreTrust bypass (trust_cache_rt), SEP/NVRAM, persistence, verify.
+
+RESEARCH STATUS (Nov 2026 Ground Truth):
+- Gated on real kernel R/W. Research on A18 / iOS 26.6.1 confirms CVE-2026-86916 (IGMP UAF)
+  is PATCHED in binary.
+- AVE2 DPB OOB write is hardware-blocked by Apple DART IOMMU (DARTHwException).
+- ICMP6_FILTER provides a confirmed 32B socket write, but lacks an upstream KASLR slide.
+- Traditional root methods (zeroing ucred/cs_config) are blocked by SPTM RO zones.
 EOF
 }
 
@@ -167,7 +172,11 @@ print_doc_bypass_full() {
 Full 5-stage activation bypass chain: AFC staging, online activation
 or VUL 23 race fallback (RESEARCH-ONLY / UNPROVEN - invented keys),
 crash triage, Darwin notification burst, and live SpringBoard transition.
-Does not require kernel exploitation.
+
+RESEARCH STATUS (Zero-Fake-Success):
+- Fails SEP local-nonce cryptographic validation (Error -5) on 100% of attempts on
+  A18 Pro / iOS 26.6.1. Synthesized offline records cannot satisfy SEP nonce checks.
+- Unauthenticated AFC rejects .plist writes, so PurpleBuddy flags are ignored by Setup.
 EOF
 }
 
@@ -219,8 +228,9 @@ WebCodecs. Fallback 1: V-047 AppleJPEGDriver OOB write (startDecoderExt,
 IOSurface heap groom, NECP PGZ spray). Fallback 2: AppleMCCUserClientV2
 testMode (selectors 0x12/0x7/0x8/0x10). On success, probes kread64
 against allproc using iOS 26.6.1 T8140 offsets with PAC pointer
-stripping. Host orchestration only; live IOKit exploitation requires
-an on-device payload or WebSheet captive portal.
+stripping. Also probes the ICMP6_FILTER 32-byte socket primitive (from
+ios26-kernel-research). Host orchestration only; live IOKit exploitation
+requires an on-device payload or WebSheet captive portal.
 EOF
 }
 
@@ -246,20 +256,19 @@ EOF
 print_doc_setup_assistant_chain() {
     cat <<'EOF'
 Wi-Fi Portal & Setup Assistant AppleAVE2 Video Kernel Exploit & Activation Chain:
-Full End-to-End Chain: Soft AP -> WebSheet -> AppleAVE2 Win -> Device Activation.
+Soft AP -> WebSheet -> AppleAVE2 Win -> Device Activation.
 Launches captive DNS (53), HTTP (80), and TLS (443) servers to intercept
 Apple CNA probe queries from an unactivated device in Setup Assistant.
-Automatically pops up WebSheet on the device, executes loader.js recon,
-and triggers the AppleAVE2 (CVE-2026-84607) eEncType state management race
-directly from WebSheet via WebCodecs VideoEncoder to the WebKit GPU process
-and kernel AppleAVE2Driver.
-Once kernel R/W is won:
-1. Injects CoreTrust trust cache and disarms AMFI/SEP kernel hooks.
-2. Transitions Wi-Fi Captive Portal to Success mode (dismissing WebSheet).
-3. Serves synthesized A18 Pro activation record on /deviceservices/deviceActivation.
-4. When USB is connected, injects MobileActivation & PurpleBuddy flags, stages
-   preferences to Media partition, broadcasts 14 Darwin setup dismissal
-   notifications, and resprings directly into the unlocked Home Screen.
+Automatically pops up WebSheet on the device and tests the AppleAVE2
+(CVE-2026-84607) eEncType state race via WebCodecs VideoEncoder.
+
+RESEARCH STATUS (Nov 2026 Ground Truth):
+- WebSheet portal interaction confirmed on device.
+- Binary analysis shows AssignUnitPreempt (CVE-2026-112466) does not leak KASLR
+  (comparand-only in x8, clobbered before output).
+- AVE2 DPB OOB write is blocked by Apple DART IOMMU (DARTHwException).
+- Full Stage 6 kernel R/W and activation remain blocked on iOS 26.6.1 without a
+  separate unmitigated KASLR leak.
 EOF
 }
 
@@ -269,35 +278,27 @@ CVE-2026-86950 GlyphGrift V2 — Coverage Buffer Shaping & Controlled Primitive:
 Soft AP → WebSheet heap spray (bmalloc 48-256B multi-zone) → multi-PDF OOB
 (k128, k192, and DX 33-40 sweep; up to 5 retry rounds) → corruption scan →
 captive_krw bridge → AMFI/SEP/activation.
-Stages 0–4 unchanged (trigger/telemetry). Stages 5–8 auto-chain after the
-OOB path (no operator y/N). Crash/OOB alone never implies kernel R/W.
-Operator selects delivery vector before start:
-  1) <img> ImageIO thumbnail path (in-process)
-  2) <object> inline CG PDF render path
-Heap-only for exploit stages; --glyphgrift-stack remains research-only.
-Fixed in iOS 26.7.1. Target iOS 26.6.1 (23G83) is vulnerable.
+
+RESEARCH STATUS (Nov 2026 Ground Truth):
+- CoreGraphics PDF defect (CVE-2026-86950 / CVE-2026-112611) resides strictly in
+  userspace (CGPDFService.xpc / WebSheet).
+- 0% memory corruption in live testing; does not provide kernel R/W or SEP bypass.
+- Evaluated as a userspace renderer primitive only.
 EOF
 }
 
 print_doc_restore_chain() {
      cat <<'EOF'
 CVE-2026-84598 class — MobileBackup2 (com.apple.mobilebackup2) restore-
-staging path-traversal chain. Over a plain USB lockdown connection (no
-kernel exploit, no Wi-Fi) the host drives a full mb2 restore session:
-version exchange -> "Hello" (SupportedProtocolVersions [2.0, 2.1]) ->
-serve Manifest.plist (Version 8.0, SystemDomainsVersion 19.0) -> stream a
-synthesized .mbdb (magic "mbdb", major 1, per-entry domain/path/props
-bplist) over the device-link file stream, where phase-1 entries use
-domain escapes (SysContainerDomain-../..) to stage canary files at the
-/var/mobile/Media in-jail root and /var/tmp, and phase-2 entries plant
-purplebuddy / SetupAssistant unlock plists under /var/mobile/Library.
-A hard gate (stage 4) re-reads the phase-1 canary over plain AFC before
-any unlock stage runs; if the traversal did not materialize at copy time
-the chain stops honestly (parse-accept alone is not a write primitive).
-On confirmation it reuses the proven post-exploit stack: lockdown flag
- injection, synthesized offline A18 Pro activation, SpringBoard/Setup
- preferences, a 14-event Darwin dismissal burst, and a respring into the
- unlocked Home Screen. Target gate: A18 Pro / iOS 26.6.1 (23G83).
+staging path-traversal chain over USB lockdown connection.
+
+RESEARCH STATUS (Closed Out on A18 Pro):
+- A18 Pro / iOS 26.6.1 returns InvalidService / ServiceProhibited for
+  com.apple.mobilebackup2 in Setup Assistant state.
+- Path traversal cannot materialize without an active mb2 service registration.
+- Retained in codebase for historical reference and older target research.
+EOF
+}
 
  TRANSPORT (by target): on the A18 Pro the legacy-lockdown
  com.apple.mobilebackup2 service is NOT registered (idevicebackup2:

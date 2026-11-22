@@ -59,3 +59,11 @@ checkm8-compatible, so the payload must reach the device by other means
   `chain-setup-assistant.md`), PMAP plists (lab: `pmap_result_lab_*.plist`).
 - Self-tests 15–16 (KASLR slide, C2 bridge + dynamic discovery) validate the
   stage-6 logic against a mocked bridge.
+
+## November 2026 Kernel Research Findings & Primitive Feasibility
+
+Empirical investigation on an A18 target on iOS 26.6.1 (Build 23G83) establishes:
+- **IGMP Multicast UAF (CVE-2026-86916) is PATCHED**: Binary disassembly confirmed the CAS-unlock was removed at `handler+0x0584`. Over 21M multicast operations yielded zero heap anomalies; the `getsourcefilter` read primitive cannot be triggered via this path on 26.6.1.
+- **ICMP6_FILTER 32-Byte Write Primitive (PROVEN)**: `setsockopt(IPPROTO_ICMPV6, ICMP6_FILTER, 32B)` writes exactly 32 bytes of attacker-controlled data to `*in6p_icmp6filt`. The write path is unencumbered by PAC and reachable from an unprivileged sandbox. However, redirecting `in6p_icmp6filt` safely requires an upstream pointer write and a verified KASLR slide.
+- **Userland Sandbox Escape (`worse_query`)**: A TOCTOU symlink race against `containermanagerd` using the class 7 (appGroup) bit 35 flag (`0x0000000800000000`) reliably escapes the container sandbox. However, it requires an existing App Group entitlement, meaning it is restricted to post-activation sideloaded applications.
+- **Hardware SPTM & PAC Enforcement**: Traditional privilege escalation (zeroing `ucred`, swapping `p_ucred`, disabling `cs_config` or AMFI flags) is permanently mitigated by SPTM-enforced read-only zones and PAC data pointers (~18,652 PAC data operations across `__TEXT_EXEC`).
